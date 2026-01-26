@@ -64,6 +64,8 @@ psg_channel_reset(PSGChannel *ch, int index)
 
     ch->volume        = 12;
     ch->octave        = 4;
+
+    ch->j_return_offset = 0;
 }
 
 /* ドライバ初期化 */
@@ -213,13 +215,41 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             /* ボリューム v0〜v15 */
             ch->volume = code & 0x0F;
             continue;
-        } else if (code == 0xFF) {
-            /* エンドマーク */
-            ch->active = 0;
-            return;
-        } else {
-            /* 未対応コマンドは現状スキップするだけ */
-            /* 将来: F0〜F3, FA〜FD 等をここで処理 */
+        } else if (hi == 0xA0) {
+            int vol = ch->volume + (code & 0x0F);
+            if (vol > 15)
+                vol = 15;
+            ch->volume = vol;
+            continue;
+        } else if (hi == 0xB0) {
+            int vol = ch->volume - (code & 0x0F);
+            if (vol < 0)
+                vol = 0;
+            ch->volume = vol;
+            continue;
+        }
+
+        switch (code) {
+        case 0xf7:    /* L+ コマンド */
+            ch->lplus_default = ch->data_base[ch->data_offset++];
+            continue;
+        case 0xf9:    /* L コマンド */
+            ch->l_default = ch->data_base[ch->data_offset++];
+            continue;
+        case 0xfe:    /* J コマンド */
+            ch->j_return_offset = ch->data_offset;
+            ch->octave_backup = (ch->octave << 4) | (ch->octave_backup & 0x0f);
+            continue;
+        case 0xff:    /* エンドマーク */
+            if (ch->j_return_offset != 0) {
+                ch->data_offset = ch->j_return_offset;
+                ch->octave = (ch->octave_backup >> 4) & 0x0f;
+                return;
+            } else {
+                ch->active = 0;
+                return;
+            }
+        default:
             continue;
         }
     }
