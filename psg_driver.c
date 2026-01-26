@@ -31,7 +31,7 @@ psg_calc_tone(uint8_t octave, uint8_t note)
     uint16_t base = psg_tone_table_oct1[note];
 
     /* octave difference: target */
-    int diff = (int)octave - 1;
+    int diff = (int)octave;
 
     if (diff > 0) {
         while (diff-- > 0) {
@@ -59,8 +59,8 @@ psg_channel_reset(PSGChannel *ch, int index)
     ch->channel_index = (uint8_t)index;
     ch->active        = 0;
 
-    ch->l_default     = 24; /* 適当なデフォルト音長（tick） */
-    ch->lplus_default = 96; /* 全音ぶんなど、後で調整可能 */
+    ch->l_default     = 24;
+    ch->lplus_default = 192;
 
     ch->volume        = 12;
     ch->octave        = 4;
@@ -143,8 +143,8 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
     /* 音長カウンタが残っていればデクリメントして終わり */
     if (ch->wait_counter > 0) {
         ch->wait_counter--;
-        if (ch->wait_counter == 0) {
-            /* 簡易に、音長終了時にボリューム0で音を切る */
+        if (ch->wait_counter < ch->q_default) {
+            /* とりあえずゲートタイム過ぎていたらボリューム0で音を切る */
             psg_write(drv, AY_AVOL + ch->channel_index, 0);
         }
         return;
@@ -230,11 +230,77 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
         }
 
         switch (code) {
+        case 0xea:    /* S コマンド */
+             ch->eg_width_base = ch->data_base[ch->data_offset++];
+             if (ch->eg_width_base != 0) {
+                 ch->eg_count_base = ch->data_base[ch->data_offset++];
+                 ch->eg_delta_base = ch->data_base[ch->data_offset++];
+                 ch->eg2_width_base = ch->data_base[ch->data_offset++];
+                 ch->eg2_count_base = ch->data_base[ch->data_offset++];
+            }
+            continue;
+        case 0xeb:    /* W コマンド */
+            (void)ch->data_base[ch->data_offset++];
+            continue;
+        case 0xec:    /* W+/- コマンド */
+            (void)ch->data_base[ch->data_offset++];
+            continue;
+        case 0xed:    /* P1 コマンド */
+            continue;
+        case 0xee:    /* P2 コマンド */
+            continue;
+        case 0xef:    /* P3 コマンド */
+            continue;
+
+        case 0xf0:    /* [ コマンド */
+            (void)ch->data_base[ch->data_offset++];
+            continue;
+        case 0xf1:    /* ] コマンド (ジャンプ1バイト) */
+            (void)ch->data_base[ch->data_offset++];
+            continue;
+        case 0xf2:    /* ] コマンド (ジャンプ2バイト) */
+            (void)ch->data_base[ch->data_offset++];
+            (void)ch->data_base[ch->data_offset++];
+            continue;
+        case 0xf3:    /* : コマンド */
+            (void)ch->data_base[ch->data_offset++];
+            (void)ch->data_base[ch->data_offset++];
+            continue;
+        case 0xf4:    /* I コマンド */
+            drv->main.i_command_value = ch->data_base[ch->data_offset++];
+            continue;
+        case 0xf5:    /* M コマンド */
+             ch->vib_weight_base = ch->data_base[ch->data_offset++];
+             ch->vib_count_base = ch->data_base[ch->data_offset++];
+             ch->vib_amp_base = ch->data_base[ch->data_offset++];
+             ch->vib_delta_base = ch->data_base[ch->data_offset++];
+             /* 第4パラメータでビブラートフラグセットクリア */
+            continue;
+        case 0xf6:    /* N コマンド */
+            /* ビブラート効果の有効／無効スイッチ */
+            continue;
         case 0xf7:    /* L+ コマンド */
             ch->lplus_default = ch->data_base[ch->data_offset++];
             continue;
+        case 0xf8:    /* T コマンド */
+            (void)ch->data_base[ch->data_offset++]; /* テンポ値 */
+            (void)ch->data_base[ch->data_offset++]; /* F6h 値 */
+            continue;
         case 0xf9:    /* L コマンド */
             ch->l_default = ch->data_base[ch->data_offset++];
+            continue;
+        case 0xfa:    /* Q コマンド */
+           ch->q_default = ch->data_base[ch->data_offset++];
+           continue;
+        case 0xfb:    /* U% コマンド */
+            (void)ch->data_base[ch->data_offset++];
+            continue;
+        case 0xfc:    /* U+/- コマンド */
+            (void)ch->data_base[ch->data_offset++];
+            continue;
+        case 0xfd:    /* M% コマンド */
+             ch->vib_delta_base = ch->data_base[ch->data_offset++];
+             /* 第4パラメータでビブラートフラグセットクリア */
             continue;
         case 0xfe:    /* J コマンド */
             ch->j_return_offset = ch->data_offset;
@@ -250,6 +316,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
                 return;
             }
         default:
+            printf("ch %d unknown command: %02x\n", ch->channel_index, code);
             continue;
         }
     }
@@ -261,7 +328,7 @@ psg_driver_tick(PSGDriver *drv)
 {
     drv->tick_count++;
 
-    if (drv->tick_count >= 8) {
+    if (drv->tick_count >= 9) {
         for (int i = 0; i < 3; i++) {
             psg_channel_tick(drv, &drv->ch[i]);
         }

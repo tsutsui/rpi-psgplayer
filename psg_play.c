@@ -274,43 +274,9 @@ psg_hw_init(void)
 
 static PSGDriver driver_private;
 
-static const uint8_t test_data_ch0[] = {
-    /* o4 v15 */
-    0x85,       /* 8x: octave */
-    0x9f,       /* 9x: volume */
-
-    0x21, 96,   /* C  (1) len_flag=2 (0x2<<4 | 0x1 = 0x21) */
-    0x84,       /* 8x: octave */
-    0x2c, 96,   /* B  (11) */
-    0x85,       /* 8x: octave */
-    0x21, 96,   /* C  (1) */
-
-    0xff        /* end mark */
-};
-
-static const uint8_t test_data_ch1[] = {
-    /* o5 v15 */
-    0x85,       /* 8x: octave */
-    0x9f,       /* 9x: volume */
-
-    0x25, 96,   /* E  (5) */
-    0x23, 96,   /* D  (3) */
-    0x25, 96,   /* E  (5) */
-
-    0xff        /* end mark */
-};
-
-static const uint8_t test_data_ch2[] = {
-    /* o5 v15 */
-    0x85,       /* 8x: octave */
-    0x9f,       /* 9x: volume */
-
-    0x28, 96,   /* G  (8) */
-    0x28, 96,   /* G  (8) */
-    0x28, 96,   /* G  (8) */
-
-    0xff        /* end mark */
-};
+#include "psg_data_a.c"
+#include "psg_data_b.c"
+#include "psg_data_c.c"
 
 static void
 psg_write_reg(void *user, uint8_t reg, uint8_t val)
@@ -359,9 +325,9 @@ main(int argc, char **argv)
 
     PSGDriver *drv = &driver_private;
     psg_driver_init(drv, psg_write_reg, (void *)gpio);
-    psg_driver_set_channel_data(drv, 0, test_data_ch0);
-    psg_driver_set_channel_data(drv, 1, test_data_ch1);
-    psg_driver_set_channel_data(drv, 2, test_data_ch2);
+    psg_driver_set_channel_data(drv, 0, psg_data_a);
+    psg_driver_set_channel_data(drv, 1, psg_data_b);
+    psg_driver_set_channel_data(drv, 2, psg_data_c);
     psg_driver_start(drv);
 
     /*
