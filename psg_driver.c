@@ -180,7 +180,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
                 break;
             }
 
-            ch->wait_counter = len;
+            ch->wait_counter = len - 1;
 
             if (note == 0) {
                 /* 休符：ボリューム0で待つ */
