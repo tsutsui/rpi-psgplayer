@@ -1,0 +1,242 @@
+#include "psg_driver.h"
+#include <string.h>
+#include <stdio.h>
+
+/* 12音階テーブル */
+static const uint16_t psg_tone_table_oct1[13] = {
+    0,      /* 0: R  */
+    0x1DD0, /* 1: C  */
+    0x1C24, /* 2: C# */
+    0x1A90, /* 3: D  */
+    0x1912, /* 4: D# */
+    0x17AA, /* 5: E  */
+    0x1656, /* 6: F  */
+    0x1514, /* 7: F# */
+    0x13E6, /* 8: G  */
+    0x12C8, /* 9: G# */
+    0x11BA, /* A: A  */
+    0x10BC, /* B: A# */
+    0x0FCC  /* C: B  */
+};
+
+/* octave 値 (1〜8) と note (1〜12) からトーン値を算出（ざっくり）。 */
+static uint16_t
+psg_calc_tone(uint8_t octave, uint8_t note)
+{
+    if (note == 0 || note > 12 || octave < 1 || octave > 8) {
+        return 0;
+    }
+
+    /* octave=1 基準 */
+    uint16_t base = psg_tone_table_oct1[note];
+
+    /* octave difference: target */
+    int diff = (int)octave - 1;
+
+    if (diff > 0) {
+        while (diff-- > 0) {
+            base >>= 1; /* 周期値を半分＝周波数 2倍 */
+        }
+    }
+
+    return base;
+}
+
+/* PSG レジスタ書き込みヘルパ */
+static inline void
+psg_write(PSGDriver *drv, uint8_t reg, uint8_t val)
+{
+    if (drv->write_reg) {
+        (*drv->write_reg)(drv->write_user, reg, val);
+    }
+}
+
+/* チャンネルをリセット */
+static void
+psg_channel_reset(PSGChannel *ch, int index)
+{
+    memset(ch, 0, sizeof(*ch));
+    ch->channel_index = (uint8_t)index;
+    ch->active        = 0;
+
+    ch->l_default     = 24; /* 適当なデフォルト音長（tick） */
+    ch->lplus_default = 96; /* 全音ぶんなど、後で調整可能 */
+
+    ch->volume        = 12;
+    ch->octave        = 4;
+}
+
+/* ドライバ初期化 */
+void
+psg_driver_init(PSGDriver *drv,
+                PSGWriteRegFn write_cb,
+                void *user)
+{
+    memset(drv, 0, sizeof(*drv));
+    drv->write_reg  = write_cb;
+    drv->write_user = user;
+
+    for (int i = 0; i < 3; i++) {
+        psg_channel_reset(&drv->ch[i], i);
+    }
+}
+
+/* チャンネルにオブジェクトデータを設定 */
+void
+psg_driver_set_channel_data(PSGDriver *drv,
+                            int ch_index,
+                            const uint8_t *data)
+{
+    if (ch_index < 0 || ch_index >= 3) {
+        return;
+    }
+    PSGChannel *ch = &drv->ch[ch_index];
+
+    ch->data_base   = data;
+    ch->data_offset = 0;
+    ch->wait_counter = 0;
+    ch->active       = 1;
+}
+
+/* 再生開始（とりあえずリセットしたうえで active=1 にする程度） */
+void
+psg_driver_start(PSGDriver *drv)
+{
+    for (int i = 0; i < 3; i++) {
+        PSGChannel *ch = &drv->ch[i];
+        ch->wait_counter = 0;
+        ch->active       = (ch->data_base != NULL) ? 1 : 0;
+    }
+}
+
+/* 再生停止 */
+void
+psg_driver_stop(PSGDriver *drv)
+{
+    for (int i = 0; i < 3; i++) {
+        PSGChannel *ch = &drv->ch[i];
+        ch->active       = 0;
+        ch->wait_counter = 0;
+
+        /* ボリューム0を書いてミュート */
+        psg_write(drv, AY_AVOL + i, 0);
+    }
+}
+
+/* I コマンド値取得（今は単純に MAIN ワークの内容を返すだけ） */
+uint8_t
+psg_driver_get_i_command(const PSGDriver *drv)
+{
+    return drv->main.i_command_value;
+}
+
+/* 1チャンネルぶんの 1tick 処理（Stage 1 簡易版） */
+static void
+psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
+{
+    if (!ch->active) {
+        return;
+    }
+
+    /* 音長カウンタが残っていればデクリメントして終わり */
+    if (ch->wait_counter > 0) {
+        ch->wait_counter--;
+        if (ch->wait_counter == 0) {
+            /* 簡易に、音長終了時にボリューム0で音を切る */
+            psg_write(drv, AY_AVOL + ch->channel_index, 0);
+        }
+        return;
+    }
+
+    /* 次のオブジェクトを読み取るループ。
+       コマンドだけが連続する場合を考慮して、音符を読むまで回す。 */
+    for (;;) {
+        uint8_t code = ch->data_base[ch->data_offset++];
+
+        if ((code & 0x80) == 0) {
+            /* === 音符オブジェクト === */
+
+            uint8_t note     = code & 0x0F;
+            uint8_t len_flag = (code >> 4) & 0x03;
+            /* bit6 のタイは Stage 1 では無視 */
+
+            uint16_t len = 0;
+
+            switch (len_flag) {
+            case 0x0: /* L デフォルト */
+                len = ch->l_default;
+                break;
+            case 0x1: /* L+ デフォルト */
+                len = ch->lplus_default;
+                break;
+            case 0x2: /* 1バイト音長 */
+                len = ch->data_base[ch->data_offset++];
+                break;
+            case 0x3: /* 2バイト音長 (little endian) */
+                len  = ch->data_base[ch->data_offset++];
+                len |= (uint16_t)ch->data_base[ch->data_offset++] << 8;
+                break;
+            }
+
+            ch->wait_counter = len;
+
+            if (note == 0) {
+                /* 休符：ボリューム0で待つ */
+                psg_write(drv, AY_AVOL + ch->channel_index, 0);
+            } else {
+                /* 通常の音符 */
+
+                uint16_t tone = psg_calc_tone(ch->octave, note);
+                ch->freq_value = tone;
+
+                psg_write(drv, AY_AFINE + ch->channel_index * 2,
+                    (uint8_t)(tone & 0xFF));
+                psg_write(drv, AY_ACOARSE + ch->channel_index * 2,
+                    (uint8_t)((tone >> 8) & 0x0F));
+                psg_write(drv, AY_AVOL + ch->channel_index,
+                        (uint8_t)(ch->volume & 0x0F));
+            }
+
+            /* 音符を処理したので、この tick は終了 */
+            return;
+        }
+
+        /* === コマンドオブジェクト === */
+        uint8_t hi = code & 0xF0;
+
+        if (hi == 0x80) {
+            /* オクターブ o1〜o8 */
+            ch->octave = code & 0x0F;
+            /* 続けて次のオブジェクトを見る */
+            continue;
+        } else if (hi == 0x90) {
+            /* ボリューム v0〜v15 */
+            ch->volume = code & 0x0F;
+            continue;
+        } else if (code == 0xFF) {
+            /* エンドマーク */
+            ch->active = 0;
+            return;
+        } else {
+            /* 未対応コマンドは現状スキップするだけ */
+            /* 将来: F0〜F3, FA〜FD 等をここで処理 */
+            continue;
+        }
+    }
+}
+
+/* 2msごとの割り込み相当処理 */
+void
+psg_driver_tick(PSGDriver *drv)
+{
+    drv->tick_count++;
+
+    if (drv->tick_count >= 8) {
+        for (int i = 0; i < 3; i++) {
+            psg_channel_tick(drv, &drv->ch[i]);
+        }
+    drv->tick_count = 0;
+    }
+
+    /* フェード等があればここで main ワークを更新（後で実装） */
+}
