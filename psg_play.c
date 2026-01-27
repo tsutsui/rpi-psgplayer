@@ -274,10 +274,6 @@ psg_hw_init(void)
 
 static PSGDriver driver_private;
 
-#include "psg_data_a.c"
-#include "psg_data_b.c"
-#include "psg_data_c.c"
-
 static void
 psg_write_reg(void *user, uint8_t reg, uint8_t val)
 {
@@ -286,16 +282,14 @@ psg_write_reg(void *user, uint8_t reg, uint8_t val)
     printf("%s: reg: %2x, val: %2x\n", __func__, reg, val);
 }
 
-#if 0
 static void
 usage(const char *prog)
 {
     fprintf(stderr,
-        "Usage: %s\n", prog);
+        "Usage: %s p6psgfile\n", prog);
 
     exit(EXIT_FAILURE);
 }
-#endif
 
 int
 main(int argc, char **argv)
@@ -307,6 +301,45 @@ main(int argc, char **argv)
     sa.sa_handler = on_signal;
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
+
+    if (argc != 2)
+        usage(argv[0]);
+
+    /* read P6 PSG data file */
+    FILE *p6psgfile = fopen(argv[1], "rb");
+    if (p6psgfile == NULL) {
+        die("fopen p6psgfile");
+    }
+    fseek(p6psgfile, 0, SEEK_END);
+    size_t p6size = ftell(p6psgfile);
+    fseek(p6psgfile, 0, SEEK_SET);
+    if (p6size < (8 + 3)) {
+        die("p6psgfile too short");
+    }
+    uint8_t *psgdata = malloc(p6size);
+    if (psgdata == NULL) {
+        die("malloc p6psgfile");
+    }
+    if (fread(psgdata, 1, p6size, p6psgfile) != p6size) {
+        die("fread p6psgfile");
+    }
+    (void)fclose(p6psgfile);
+
+    /* parse and split P6 PSG data file per channel */
+    uint16_t a_addr = ((uint16_t)psgdata[1] << 8) | psgdata[0];
+    uint16_t b_addr = ((uint16_t)psgdata[3] << 8) | psgdata[2];
+    uint16_t c_addr = ((uint16_t)psgdata[5] << 8) | psgdata[4];
+    if (c_addr > p6size || b_addr >= c_addr || a_addr >= b_addr || a_addr < 8) {
+        die("p6psgfile invalid address");
+    }
+    uint16_t a_size = b_addr - a_addr;
+    uint16_t b_size = c_addr - b_addr;
+    uint16_t c_size = p6size - c_addr;
+    if (psgdata[a_addr + a_size - 1] != 0xff ||
+        psgdata[b_addr + b_size - 1] != 0xff ||
+        psgdata[c_addr + c_size - 1] != 0xff) {
+        die("p6psgfile invalid data");
+    }
 
     int fd = open(dev, O_RDWR | O_SYNC);
     if (fd == -1)
@@ -325,9 +358,9 @@ main(int argc, char **argv)
 
     PSGDriver *drv = &driver_private;
     psg_driver_init(drv, psg_write_reg, (void *)gpio);
-    psg_driver_set_channel_data(drv, 0, psg_data_a);
-    psg_driver_set_channel_data(drv, 1, psg_data_b);
-    psg_driver_set_channel_data(drv, 2, psg_data_c);
+    psg_driver_set_channel_data(drv, 0, &psgdata[a_addr]);
+    psg_driver_set_channel_data(drv, 1, &psgdata[b_addr]);
+    psg_driver_set_channel_data(drv, 2, &psgdata[c_addr]);
     psg_driver_start(drv);
 
     /*
@@ -380,5 +413,6 @@ main(int argc, char **argv)
 
     munmap((void*)gpio, GPIO_SIZE);
     close(fd);
+    free(psgdata);
     return 0;
 }
