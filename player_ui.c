@@ -99,9 +99,9 @@ static const char *ui_tmpl[UI_ROWS] = {
   "+-----------------------------------------------------------------------------+", /*  4 */
   "| Music Title: _____________________________________  t=_____._s  tick=_____  |", /*  5 */
   "+-----------------------------------------------------------------------------+", /*  6 */
-  "| Ch A: NOTE=--  ---.-Hz  VOL=__ [...............]  TONE=ON   NOISE=OFF       |", /*  7 */
-  "| Ch B: NOTE=--  ---.-Hz  VOL=__ [...............]  TONE=ON   NOISE=OFF       |", /*  8 */
-  "| Ch C: NOTE=--  ---.-Hz  VOL=__ [...............]  TONE=ON   NOISE=OFF       |", /*  9 */
+  "| Ch A: NOTE=--   ---.-Hz  VOL=__ [...............]  TONE=ON   NOISE=OFF      |", /*  7 */
+  "| Ch B: NOTE=--   ---.-Hz  VOL=__ [...............]  TONE=ON   NOISE=OFF      |", /*  8 */
+  "| Ch C: NOTE=--   ---.-Hz  VOL=__ [...............]  TONE=ON   NOISE=OFF      |", /*  9 */
   "+-+--------+-----------+-----------+-----------+-----------+-----------+------+", /* 10 */
   "| |O1      |O2         |O3         |O4         |O5         |O6         |O7    |", /* 11 */
   "|C|  # # # |# #  # # # |# #  # # # |# #  # # # |# #  # # # |# #  # # # |# #  #|", /* 12 */
@@ -356,14 +356,14 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
      */
     const int COL_NOTE  = 13;      /* points to 'E' in "E4" */
     const int W_NOTE    = 3;       /* allow "C#4" */
-    const int COL_HZ    = 17;      /* points to first digit in "329.6" */
-    const int W_HZ      = 5;       /* "329.6" */
-    const int COL_VOLN  = 30;      /* points to first digit in "10" (VOL=10) */
+    const int COL_HZ    = 17;      /* points to first digit in " 329.6" */
+    const int W_HZ      = 6;       /* " 329.6" */
+    const int COL_VOLN  = 31;      /* points to first digit in "10" (VOL=10) */
     const int W_VOLN    = 2;
-    const int COL_BAR   = 34;      /* inside [...............] start */
+    const int COL_BAR   = 35;      /* inside [...............] start */
     const int W_BAR     = 15;
-    const int COL_TONE  = 57;      /* points to 'O' in "ON"/"OFF" */
-    const int COL_NOISE = 68;      /* points to 'O' in "OFF" */
+    const int COL_TONE  = 58;      /* points to 'O' in "ON"/"OFF" */
+    const int COL_NOISE = 69;      /* points to 'O' in "OFF" */
 
     /* Piano marker rows: A,B,C */
     const int ROW_PIANO[3] = { 14, 15, 16 };
@@ -421,7 +421,7 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
             ui->mus[ch].note == 0 ||
             ui->mus[ch].volume == 0 ||
             period == 0) {
-            put_bytes(frame[row], COL_HZ, "-----");
+            put_bytes(frame[row], COL_HZ, " -----");
         } else {
             double hz = psg_period_to_hz(period, clock_hz);
             /* clamp for display sanity */
