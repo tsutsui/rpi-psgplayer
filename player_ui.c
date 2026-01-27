@@ -300,33 +300,8 @@ piano_plot_col(uint8_t octave, uint8_t note /*1..12*/)
     if (note < 1 || note > 12)
         return -1;
 
-    /* Segment widths derived from your header border:
-       O1:8, O2..O6:11, O7:6  (payload only, excluding separators)
-       We map 12 semitones into each segment with integer scaling.
-     */
-    static const int segw[7] = { 8, 11, 11, 11, 11, 11, 6 };
-
-    /* Piano header line has: "| | O1     |O2         |...|O7    |"
-       Data lines are "|A|.............|"
-       We'll treat the plot area starting right after "|A|" = col 3.
-       Then, we lay out each octave segment with a '|' separator exactly like header:
-         [seg O1 payload][|][seg O2 payload][|]...[|][seg O7 payload]
-       Total payload+seps must match the dots count in template; if minor mismatch,
-       it will still look OK because we're only plotting single markers.
-     */
-
-    int col = 3; /* first dot column */
-    for (int o = 1; o < octave; o++) {
-        col += segw[o - 1];
-        col += 1; /* separator '|' position in header; in dots line it's also '.' but we keep spacing */
-    }
-
-    int w = segw[octave - 1];
-    int semi = (int)note - 1; /* 0..11 */
-
-    /* scale semitone to [0..w-1] */
-    int dx = (w <= 1) ? 0 : (semi * (w - 1)) / 11;
-    int x = col + dx;
+    /* プロット領域左端 col=3 の位置が O1E (octave=1, note=5) なので -1 必要 */
+    int x = (octave - 1) * 12 + (note - 1) - 1;
 
     /* clamp into drawable region */
     if (x < 3)
