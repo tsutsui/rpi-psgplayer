@@ -97,7 +97,7 @@ static const char *ui_tmpl[UI_ROWS] = {
   "| YM2149 P6 PSG Player on Raspberry Pi 3B @ Open Source Conference Osaka 2026 |", /*  2 */
   "| Clock: 2.000 MHz, Rate: 2ms/tick, BCM2837 GPIO controlled by NetBSD/evbarm  |", /*  3 */
   "+-----------------------------------------------------------------------------+", /*  4 */
-  "| Music Title: _______________________________________  t=___._s  tick=_____  |", /*  5 */
+  "| Music Title: _____________________________________  t=_____._s  tick=_____  |", /*  5 */
   "+-----------------------------------------------------------------------------+", /*  6 */
   "| Ch A: NOTE=--  ---.-Hz  VOL=__ [...............]  TONE=ON   NOISE=OFF       |", /*  7 */
   "| Ch B: NOTE=--  ---.-Hz  VOL=__ [...............]  TONE=ON   NOISE=OFF       |", /*  8 */
@@ -338,12 +338,12 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
     /* Music Title line: row 4 in tmpl (0-based), underline field begins after "Music Title: " */
     const int ROW_TITLE = 4;
     const int COL_TITLE = 15;      /* after "| Music Title: " */
-    const int W_TITLE   = 40;      /* number of '_' in template */
+    const int W_TITLE   = 38;      /* number of '_' in template */
 
     /* t=xxx.xs and tick= */
-    const int COL_TSEC  = 58;      /* points to first digit in "t=123.4s" */
+    const int COL_TSEC  = 56;      /* points to first digit in "t=12345.6s" */
     const int COL_TICK  = 71;      /* points to first digit in "tick=61700" */
-    const int W_TSEC    = 5;       /* "123.4" */
+    const int W_TSEC    = 7;       /* "12345.6" */
     const int W_TICK    = 5;       /* adjust if you want 6; template shows 61700 */
 
     /* Channel rows */
