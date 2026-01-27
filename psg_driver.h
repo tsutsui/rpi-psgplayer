@@ -70,6 +70,9 @@ typedef struct PSGMainWork {
     int8_t  fade_step;
     uint8_t fade_active;
 
+    uint8_t reg6_value;             /* レジスタ6 (AY_NOISEPER) 書き込み値 */
+    uint8_t reg7_value;             /* レジスタ7 (AY_ENABLE) 書き込み値 */
+
     uint8_t i_command_value;        /* I コマンドで書き込まれた値 */
 } PSGMainWork;
 

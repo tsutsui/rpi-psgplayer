@@ -78,6 +78,22 @@ psg_driver_init(PSGDriver *drv,
     drv->write_reg  = write_cb;
     drv->write_user = user;
 
+    drv->main.fade_value = 0;
+    drv->main.fade_step = 0;
+    drv->main.fade_active = 0;
+
+    /*
+     * enable tones (0..2 = 0)
+     * disable noise (3..5 = 1)
+     * both I/O output (7..6 = 1) => 0xf8
+     */
+    const uint8_t reg7_default = 0xf8;
+    psg_write(drv, AY_ENABLE, reg7_default);
+    drv->main.reg7_value = reg7_default;
+    const uint8_t reg6_default = 0xc0;
+    psg_write(drv, AY_NOISEPER, reg6_default);
+    drv->main.reg6_value = reg6_default;
+
     for (int i = 0; i < 3; i++) {
         psg_channel_reset(&drv->ch[i], i);
     }
@@ -231,6 +247,9 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             continue;
         }
 
+        uint8_t reg6, reg7;
+        uint32_t tbit, nbit;
+        int wval;
         switch (code) {
         case 0xea:    /* S コマンド */
              ch->eg_width_base = ch->data_base[ch->data_offset++];
@@ -242,16 +261,42 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             }
             continue;
         case 0xeb:    /* W コマンド */
-            (void)ch->data_base[ch->data_offset++];
+            reg6 = ch->data_base[ch->data_offset++];
+            psg_write(drv, AY_NOISEPER, reg6);
+            drv->main.reg6_value = reg6;
             continue;
         case 0xec:    /* W+/- コマンド */
-            (void)ch->data_base[ch->data_offset++];
+            wval = drv->main.reg6_value + ch->data_base[ch->data_offset++];
+            if (wval > 31)
+                wval = 31;
+            if (wval < 0)
+                wval = 0;
+            reg6 = (uint8_t)wval;
+            psg_write(drv, AY_NOISEPER, reg6);
+            drv->main.reg6_value = reg6;
             continue;
         case 0xed:    /* P1 コマンド */
-            continue;
         case 0xee:    /* P2 コマンド */
-            continue;
         case 0xef:    /* P3 コマンド */
+            tbit = 0x1u << ch->channel_index;
+            nbit = 0x1u << (ch->channel_index + 3);
+            reg7 = drv->main.reg7_value;
+            if ((code & 0x01u) != 0) {
+                /* トーン有効 */
+                reg7 &= ~tbit;
+            } else {
+                /* トーン無効 */
+                reg7 |= tbit;
+            }
+            if ((code & 0x02u) != 0) {
+                /* ノイズ有効 */
+                reg7 &= ~nbit;
+            } else {
+                /* ノイズ無効 */
+                reg7 |= nbit;
+            }
+            psg_write(drv, AY_ENABLE, reg7);
+            drv->main.reg7_value = reg7;
             continue;
 
         case 0xf0:    /* [ コマンド */

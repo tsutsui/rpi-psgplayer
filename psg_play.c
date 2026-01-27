@@ -255,10 +255,6 @@ psg_hw_reset(void)
     ctrl_inactive();
     bus_write8(0x00);
     ym_reset_pulse();
-
-    /* Basic: enable tones (0..2 = 0), disable noise (3..5 = 1) => 0x38 */
-    ym_write_reg(AY_ENABLE, 0x38);
-    ym_write_reg(AY_NOISEPER, 0x00);
 }
 
 static void
