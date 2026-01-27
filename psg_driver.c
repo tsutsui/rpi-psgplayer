@@ -3,7 +3,7 @@
 #include <stdio.h>
 
 /* 12音階テーブル */
-static const uint16_t psg_tone_table_oct1[13] = {
+static const uint16_t psg_tone_table_oct0[13] = {
     0,      /* 0: R  */
     0x1DD0, /* 1: C  */
     0x1C24, /* 2: C# */
@@ -27,17 +27,10 @@ psg_calc_tone(uint8_t octave, uint8_t note)
         return 0;
     }
 
-    /* octave=1 基準 */
-    uint16_t base = psg_tone_table_oct1[note];
+    /* octave=0 基準 (オリジナル P6 ドライバ準拠) */
+    uint16_t base = psg_tone_table_oct0[note];
 
-    /* octave difference: target */
-    int diff = (int)octave;
-
-    if (diff > 0) {
-        while (diff-- > 0) {
-            base >>= 1; /* 周期値を半分＝周波数 2倍 */
-        }
-    }
+    base >>= octave; /* オクターブ毎に周期値を半分＝周波数 2倍 */
 
     return base;
 }
