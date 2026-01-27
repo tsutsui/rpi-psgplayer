@@ -28,6 +28,7 @@ typedef struct {
     uint8_t noise_enable[3];   /* from reg[7] */
 
     /* ui timing */
+    uint64_t start_ns;
     uint64_t next_ui_ns;
     uint64_t ui_period_ns;
 

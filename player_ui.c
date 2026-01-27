@@ -66,7 +66,8 @@ ui_init(UI_state *ui, uint64_t now_ns)
 {
     memset(ui, 0, sizeof(*ui));
     ui->ui_period_ns = 50ull * 1000ull * 1000ull; /* 50ms */
-    ui->next_ui_ns   = now_ns;
+    ui->start_ns     = now_ns;
+    ui->next_ui_ns   = now_ns + ui->ui_period_ns;
 
     /* avoid stdout buffering stalls */
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -390,7 +391,7 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
 
     /* 4) time and tick */
     {
-        double tsec = (double)now_ns / 1e9;
+        double tsec = (double)(now_ns - ui->start_ns) / 1e9;
         /* overwrite digits only; keep "t=" and "s" fixed */
         put_f1_r(frame[ROW_TITLE], COL_TSEC, W_TSEC, tsec);
 
