@@ -10,6 +10,12 @@ extern "C" {
 /* PSG レジスタ書き込みコールバック型 */
 typedef void (*PSGWriteRegFn)(void *user, uint8_t reg, uint8_t val);
 
+/* デモ画面表示用ノートデータ書き込みコールバック関数型 */
+typedef void (*PSGNoteEventFn)(void *user, int ch,
+                              uint8_t octave, uint8_t note,
+                              uint8_t volume, uint16_t len,
+                              uint8_t is_rest);
+
 /* チャンネルワーク（Z80 IY+0x00〜0x27 に対応するログical構造） */
 typedef struct PSGChannel {
     const uint8_t *data_base;   /* HL が指すオブジェクトデータ先頭 */
@@ -82,13 +88,17 @@ typedef struct PSGDriver {
     PSGChannel    ch[3];            /* A/B/C の3チャンネル */
     PSGWriteRegFn write_reg;        /* PSG レジスタ書き込み */
     void         *write_user;       /* コールバックコンテキスト */
+    PSGNoteEventFn note_event;      /* デモ表示用ノートデータ書き込み */
+    void          *note_user;       /* コールバック */
     uint32_t      tick_count;       /* 経過 tick 数 */
 } PSGDriver;
 
 /* 初期化 */
 void psg_driver_init(PSGDriver *drv,
                      PSGWriteRegFn write_cb,
-                     void *user);
+                     void *write_user,
+                     PSGNoteEventFn note_cb,
+                     void *note_user);
 
 /* チャンネルにオブジェクトデータを設定 */
 void psg_driver_set_channel_data(PSGDriver    *drv,

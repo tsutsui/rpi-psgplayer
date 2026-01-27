@@ -1,5 +1,5 @@
 PROG=		psg_play
-SRCS=		psg_play.c psg_driver.c
+SRCS=		psg_play.c psg_driver.c player_ui.c
 OBJS=		${SRCS:.c=.o}
 
 CFLAGS=		-O2 -Wall

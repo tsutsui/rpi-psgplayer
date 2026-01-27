@@ -51,6 +51,16 @@ psg_write(PSGDriver *drv, uint8_t reg, uint8_t val)
     }
 }
 
+/* デモ画面表示用ノートデータ書き込み */
+static inline void
+psg_note_event(PSGDriver *drv, int ch, uint8_t octave, uint8_t note,
+               uint8_t volume, uint16_t len, uint8_t is_rest)
+{
+    if (drv->note_event) {
+        (*drv->note_event)(drv->note_user, ch, octave, note, volume, len, is_rest);
+    }
+}
+
 /* チャンネルをリセット */
 static void
 psg_channel_reset(PSGChannel *ch, int index)
@@ -72,11 +82,15 @@ psg_channel_reset(PSGChannel *ch, int index)
 void
 psg_driver_init(PSGDriver *drv,
                 PSGWriteRegFn write_cb,
-                void *user)
+                void *write_user,
+                PSGNoteEventFn note_cb,
+                void *note_user)
 {
     memset(drv, 0, sizeof(*drv));
     drv->write_reg  = write_cb;
-    drv->write_user = user;
+    drv->write_user = write_user;
+    drv->note_event = note_cb;
+    drv->note_user  = note_user;
 
     drv->main.fade_value = 0;
     drv->main.fade_step = 0;
@@ -202,10 +216,14 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
 
             if (note == 0) {
                 /* 休符：ボリューム0で待つ */
+                psg_note_event(drv, ch->channel_index,
+                               ch->octave, 0, ch->volume, (uint16_t)len, 1);
                 psg_write(drv, AY_AVOL + ch->channel_index, 0);
             } else {
                 /* 通常の音符 */
 
+                psg_note_event(drv, ch->channel_index,
+                               ch->octave, note, ch->volume, (uint16_t)len, 0);
                 uint16_t tone = psg_calc_tone(ch->octave, note);
                 ch->freq_value = tone;
 

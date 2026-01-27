@@ -27,6 +27,7 @@
 #include <unistd.h>
 
 #include "psg_driver.h"
+#include "player_ui.h"
 
 #define PERI_BASE   0x3F000000u
 #define GPIO_BASE   (PERI_BASE + 0x200000u)
@@ -269,13 +270,30 @@ psg_hw_init(void)
 }
 
 static PSGDriver driver_private;
+static UI_state g_ui;
 
 static void
 psg_write_reg(void *user, uint8_t reg, uint8_t val)
 {
     (void)user;
     ym_write_reg(reg, val);
-    printf("%s: reg: %2x, val: %2x\n", __func__, reg, val);
+
+    ui_on_reg_write(&g_ui, reg, val);
+}
+
+static void
+ui_note_event_cb(void *user, int ch, uint8_t octave, uint8_t note,
+                 uint8_t volume, uint16_t len, uint8_t is_rest)
+{
+    (void)user;
+    uint64_t now = nsec_now_monotonic();
+    ui_on_note_event(&g_ui, now, ch, octave, note, volume, len, is_rest);
+}
+
+static void
+ui_shutdown_atexit(void)
+{
+    ui_shutdown(&g_ui);
 }
 
 static void
@@ -353,7 +371,12 @@ main(int argc, char **argv)
     psg_hw_init();
 
     PSGDriver *drv = &driver_private;
-    psg_driver_init(drv, psg_write_reg, (void *)gpio);
+
+    uint64_t now0 = nsec_now_monotonic();
+    ui_init(&g_ui, now0);
+    atexit(ui_shutdown_atexit);
+
+    psg_driver_init(drv, psg_write_reg, (void *)gpio, ui_note_event_cb, NULL);
     psg_driver_set_channel_data(drv, 0, &psgdata[a_addr]);
     psg_driver_set_channel_data(drv, 1, &psgdata[b_addr]);
     psg_driver_set_channel_data(drv, 2, &psgdata[c_addr]);
@@ -403,6 +426,9 @@ main(int argc, char **argv)
             psg_driver_tick(drv);
             next_deadline += tick_ns;
         }
+
+        /* draw AFTER catch-up loop (important) */
+        ui_maybe_render(&g_ui, now, "OSC demo");
     }
 
     psg_hw_reset();
