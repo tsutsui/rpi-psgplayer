@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <inttypes.h>
 #include <assert.h>
 #include <math.h>
@@ -495,10 +496,11 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
     for (int r = 0; r < UI_ROWS; r++) {
         if (memcmp(ui->prev[r], frame[r], UI_COLS) != 0) {
             /* move cursor to row r+1, col 1 */
-            char esc[32];
-            snprintf(esc, sizeof(esc), "\033[%d;1H", r + 1);
-            fputs(esc, stdout);
-            fputs(frame[r], stdout);
+            char out[32 + UI_COLS + 4];
+            int len = snprintf(out, sizeof(out), "\033[%d;1H%.*s",
+              r + 1, UI_COLS, frame[r]);
+            if (len > 0)
+                (void)write(STDOUT_FILENO, out, (size_t)len);
             memcpy(ui->prev[r], frame[r], UI_COLS + 1);
         }
     }
