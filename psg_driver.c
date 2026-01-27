@@ -140,14 +140,16 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
         return;
     }
 
-    /* 音長カウンタが残っていればデクリメントして終わり */
+    /* ノート再生中の処理 */
     if (ch->wait_counter > 0) {
         ch->wait_counter--;
-        if (ch->wait_counter < ch->q_default) {
+        if (ch->wait_counter <= ch->q_default) {
             /* とりあえずゲートタイム過ぎていたらボリューム0で音を切る */
             psg_write(drv, AY_AVOL + ch->channel_index, 0);
         }
-        return;
+        /* ノート継続なら終了 */
+        if (ch->wait_counter > 0)
+            return;
     }
 
     /* 次のオブジェクトを読み取るループ。
@@ -180,7 +182,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
                 break;
             }
 
-            ch->wait_counter = len - 1;
+            ch->wait_counter = len;
 
             if (note == 0) {
                 /* 休符：ボリューム0で待つ */
