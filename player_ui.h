@@ -3,10 +3,10 @@
  *  API definitions for demonstration screen layout etc.
  */
 
+#include <termios.h>
+
 #define UI_ROWS 23
 #define UI_COLS 79   /* visible columns, excluding '\0' */
-
-
 
 typedef struct {
     uint64_t t_ns;     /* when this note/rest was issued */
@@ -36,6 +36,11 @@ typedef struct {
 
     char prev[UI_ROWS][UI_COLS + 1];
     int  have_prev;
+
+    struct termios tio_saved;
+    int tio_saved_valid;
+    int cursor_hidden;
+    int wrap_disabled;
 } UI_state;
 
 /* called from register write path */

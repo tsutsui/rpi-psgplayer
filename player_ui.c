@@ -14,6 +14,7 @@
 #include <math.h>
 #include <wchar.h>
 #include <locale.h>
+#include <termios.h>
 
 #include "player_ui.h"
 
@@ -61,6 +62,52 @@ ui_on_note_event(UI_state *ui, uint64_t now_ns, int ch,
     m->is_rest = is_rest ? 1 : 0;
 }
 
+static void
+ui_term_apply(UI_state *ui)
+{
+    if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO))
+        return;
+
+    /* stdout バッファ無効 */
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    /* termios 保存 */
+    if (tcgetattr(STDIN_FILENO, &ui->tio_saved) == 0) {
+        ui->tio_saved_valid = 1;
+
+        struct termios tio = ui->tio_saved;
+        tio.c_lflag &= ~(ICANON | ECHO);
+        tio.c_cc[VMIN]  = 1;
+        tio.c_cc[VTIME] = 0;
+        (void)tcsetattr(STDIN_FILENO, TCSANOW, &tio);
+    }
+
+    /* カーソル消す */
+    fputs("\033[?25l", stdout);
+    ui->cursor_hidden = 1;
+
+    /* autowrap OFF */
+    fputs("\033[?7l", stdout);
+    ui->wrap_disabled = 1;
+}
+
+static void
+ui_term_restore(UI_state *ui)
+{
+    if (ui->wrap_disabled) {
+        fputs("\033[?7h", stdout);
+        ui->wrap_disabled = 0;
+    }
+    if (ui->cursor_hidden) {
+        fputs("\033[?25h", stdout);
+        ui->cursor_hidden = 0;
+    }
+    if (ui->tio_saved_valid) {
+        (void)tcsetattr(STDIN_FILENO, TCSANOW, &ui->tio_saved);
+        ui->tio_saved_valid = 0;
+    }
+}
+
 /* ANSI UI init/shutdown */
 void
 ui_init(UI_state *ui, uint64_t now_ns)
@@ -69,12 +116,12 @@ ui_init(UI_state *ui, uint64_t now_ns)
     ui->ui_period_ns = 50ull * 1000ull * 1000ull; /* 50ms */
     ui->start_ns     = now_ns;
     ui->next_ui_ns   = now_ns + ui->ui_period_ns;
+    ui->have_prev    = 0;
 
-    /* avoid stdout buffering stalls */
-    setvbuf(stdout, NULL, _IONBF, 0);
+    ui_term_apply(ui);
 
-    /* alternate screen + hide cursor + clear */
-    fputs("\033[?1049h\033[?25l\033[H\033[J", stdout);
+    /* alternate screen + clear */
+    fputs("\033[?1049h\033[H\033[J", stdout);
 
     ui->initialized = 1;
 }
@@ -84,11 +131,16 @@ ui_shutdown(UI_state *ui)
 {
     if (ui == NULL || ui->initialized == 0)
         return;
-    /* show cursor + leave alternate screen */
-    fputs("\033[?25h\033[?1049l", stdout);
+
+    ui_term_restore(ui);
+
+    /* move cursor (in case of no alternate screen) */
+    fputs("\033[24;1H", stdout);
+
+    /* leave alternate screen */
+    fputs("\033[?1049l", stdout);
     ui->initialized = 0;
 }
-
 
 /* ---- 固定テンプレ（79桁×23行） ---- */
 

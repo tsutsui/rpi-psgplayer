@@ -67,6 +67,7 @@ enum {
 
 static volatile uint32_t *gpio;
 static volatile sig_atomic_t g_stop = 0;
+static volatile sig_atomic_t g_redraw = 0;
 
 static void
 on_signal(int signo)
@@ -389,6 +390,9 @@ main(int argc, char **argv)
     fprintf(stderr, "Start 2ms tick loop\n");
 
     while (g_stop == 0) {
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(STDIN_FILENO, &rfds);
         /*
          * Use select(2) as a 2ms-ish sleep. On HZ=500 kernels, it aligns well.
          * We still correct drift with monotonic time below.
@@ -396,8 +400,20 @@ main(int argc, char **argv)
         struct timeval tv;
         tv.tv_sec  = 0;
         tv.tv_usec = 2000; /* 2ms */
-        (void)select(0, NULL, NULL, NULL, &tv);
+        int n = select(STDIN_FILENO + 1, &rfds, NULL, NULL, &tv);
 
+        if (n > 0 && FD_ISSET(STDIN_FILENO, &rfds)) {
+            uint8_t buf[64];
+            ssize_t r = read(STDIN_FILENO, buf, sizeof(buf));
+            if (r > 0) {
+                for (ssize_t i = 0; i < r; i++) {
+                    if (buf[i] == 0x0c)
+                        g_redraw = 1;  /* Ctrl+L */
+                    if (buf[i] == 'q' || buf[i] == 'Q')
+                        g_stop = 1;    /* quit */
+                }
+            }
+        }
         /*
          * Determine how many ticks are due. This keeps timing stable even if
          * select() returns late.
@@ -423,6 +439,10 @@ main(int argc, char **argv)
         }
 
         /* draw AFTER catch-up loop (important) */
+        if (g_redraw) {
+            ui->have_prev = 0;
+            g_redraw = 0;
+        }
         ui_maybe_render(ui, now, "OSC demo");
     }
 
