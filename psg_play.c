@@ -269,31 +269,23 @@ psg_hw_init(void)
     ym_write_reg(AY_CVOL, 0);
 }
 
-static PSGDriver driver_private;
-static UI_state g_ui;
-
 static void
 psg_write_reg(void *user, uint8_t reg, uint8_t val)
 {
-    (void)user;
     ym_write_reg(reg, val);
-
-    ui_on_reg_write(&g_ui, reg, val);
+    PSGDriver *drv = user;
+    UI_state *ui = drv->note_user;
+    ui_on_reg_write(ui, reg, val);
 }
 
 static void
 ui_note_event_cb(void *user, int ch, uint8_t octave, uint8_t note,
                  uint8_t volume, uint16_t len, uint8_t is_rest)
 {
-    (void)user;
+    PSGDriver *drv = user;
+    UI_state *ui = drv->note_user;
     uint64_t now = nsec_now_monotonic();
-    ui_on_note_event(&g_ui, now, ch, octave, note, volume, len, is_rest);
-}
-
-static void
-ui_shutdown_atexit(void)
-{
-    ui_shutdown(&g_ui);
+    ui_on_note_event(ui, now, ch, octave, note, volume, len, is_rest);
 }
 
 static void
@@ -309,6 +301,8 @@ int
 main(int argc, char **argv)
 {
     const char *dev = "/dev/mem";
+    PSGDriver psgdriver, *drv;
+    UI_state uistate, *ui;
 
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -370,13 +364,14 @@ main(int argc, char **argv)
 
     psg_hw_init();
 
-    PSGDriver *drv = &driver_private;
-
+    ui = &uistate;
+    int ui_active = 0;
     uint64_t now0 = nsec_now_monotonic();
-    ui_init(&g_ui, now0);
-    atexit(ui_shutdown_atexit);
+    ui_init(ui, now0);
+    ui_active = 1;
 
-    psg_driver_init(drv, psg_write_reg, (void *)gpio, ui_note_event_cb, NULL);
+    drv = &psgdriver;
+    psg_driver_init(drv, psg_write_reg, (void *)gpio, ui_note_event_cb, ui);
     psg_driver_set_channel_data(drv, 0, &psgdata[a_addr]);
     psg_driver_set_channel_data(drv, 1, &psgdata[b_addr]);
     psg_driver_set_channel_data(drv, 2, &psgdata[c_addr]);
@@ -428,10 +423,14 @@ main(int argc, char **argv)
         }
 
         /* draw AFTER catch-up loop (important) */
-        ui_maybe_render(&g_ui, now, "OSC demo");
+        ui_maybe_render(ui, now, "OSC demo");
     }
 
+    psg_driver_stop(drv);
     psg_hw_reset();
+
+    if (ui_active)
+        ui_shutdown(ui);
 
     munmap((void*)gpio, GPIO_SIZE);
     close(fd);

@@ -40,7 +40,7 @@ static inline void
 psg_write(PSGDriver *drv, uint8_t reg, uint8_t val)
 {
     if (drv->write_reg) {
-        (*drv->write_reg)(drv->write_user, reg, val);
+        (*drv->write_reg)(drv, reg, val);
     }
 }
 
@@ -50,7 +50,7 @@ psg_note_event(PSGDriver *drv, int ch, uint8_t octave, uint8_t note,
                uint8_t volume, uint16_t len, uint8_t is_rest)
 {
     if (drv->note_event) {
-        (*drv->note_event)(drv->note_user, ch, octave, note, volume, len, is_rest);
+        (*drv->note_event)(drv, ch, octave, note, volume, len, is_rest);
     }
 }
 
