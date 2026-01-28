@@ -264,6 +264,8 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
         uint8_t reg6, reg7;
         uint32_t tbit, nbit;
         int wval;
+        int nest;
+        uint16_t offset;
         switch (code) {
         case 0xea:    /* S コマンド */
              ch->eg_width_base = ch->data_base[ch->data_offset++];
@@ -314,18 +316,59 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             continue;
 
         case 0xf0:    /* [ コマンド */
-            (void)ch->data_base[ch->data_offset++];
+            nest = ch->flags & 0x7u;
+            if (nest >= 4) {
+                /* コンパイル時にチェックされているはずだが一応 */
+                (void)ch->data_base[ch->data_offset++];
+                continue;
+            }
+            nest++;
+            ch->flags = (ch->flags & 0xF8u) | nest;
+            ch->nest_flag[nest - 1] = ch->data_base[ch->data_offset++];
+            ch->l_backup = ch->l_default;
+            ch->lplus_backup = ch->lplus_default;
+            ch->octave_backup = (ch->octave_backup & 0xF0) | ch->octave;
             continue;
         case 0xf1:    /* ] コマンド (ジャンプ1バイト) */
-            (void)ch->data_base[ch->data_offset++];
-            continue;
         case 0xf2:    /* ] コマンド (ジャンプ2バイト) */
-            (void)ch->data_base[ch->data_offset++];
-            (void)ch->data_base[ch->data_offset++];
+            offset  = ch->data_base[ch->data_offset++];
+            if (code == 0xf2) {
+                offset |= ch->data_base[ch->data_offset++] << 8;
+            } else {
+                offset |= 0xFF00u;
+            }
+            nest = ch->flags & 0x7u;
+            if (nest == 0) {
+                /* コンパイル時にチェックされているはずだが一応 */
+                continue;
+            }
+            if (--ch->nest_flag[nest - 1] == 0) {
+                /* ネスト回数終了して脱出 */
+                nest--;
+                ch->flags = (ch->flags & 0xF8) | nest;
+                continue;
+            }
+            /* ネストの最初に戻る */
+            ch->data_offset += offset;
+            ch->l_default = ch->l_backup;
+            ch->lplus_default = ch->lplus_backup;
+            ch->octave = ch->octave_backup & 0x0f;
             continue;
         case 0xf3:    /* : コマンド */
-            (void)ch->data_base[ch->data_offset++];
-            (void)ch->data_base[ch->data_offset++];
+            offset  = ch->data_base[ch->data_offset++];
+            offset |= ch->data_base[ch->data_offset++] << 8;
+            nest = ch->flags & 0x7;
+            if (nest > 4 || nest == 0) {
+                /* コンパイル時にチェックされているはずだが一応 */
+                continue;
+            }
+            if (ch->nest_flag[nest - 1] == 1) {
+                /* 最後の繰り返しなのでネスト脱出 */
+                ch->nest_flag[nest - 1] = 0;
+                nest--;
+                ch->flags = (ch->flags & 0xF8) | nest;
+                ch->data_offset += offset;
+            }
             continue;
         case 0xf4:    /* I コマンド */
             drv->main.i_command_value = ch->data_base[ch->data_offset++];
