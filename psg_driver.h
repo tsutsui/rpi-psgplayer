@@ -33,7 +33,7 @@ typedef struct PSGChannel {
 
     uint8_t        flags;           /* 各種フラグ (bit7..bit0) */
 
-    int8_t         detune;          /* デチューン補正値 */
+    uint8_t        detune;          /* デチューン補正値 (bit7:±, bit6..0:値)*/
 
     uint8_t        nest_flag[4];    /* ループ／ネスト用フラグ */
 

@@ -221,6 +221,16 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
                 psg_note_event(drv, ch->channel_index,
                                ch->octave, note, ch->volume, (uint16_t)len, 0);
                 uint16_t tone = psg_calc_tone(ch->octave, note);
+                if (ch->detune != 0) {
+                    /* デチューン分調整 */
+                    if ((ch->detune & 0x80u) == 0) {
+                        /* 最上位ビットが0なら周波数上げるので値は減算 */
+                        tone -= ch->detune;
+                    } else {
+                        /* 最上位ビットが1なら周波数下げるので値は加算 */
+                        tone += (ch->detune & ~0x80u);
+                    }
+                }
                 ch->freq_value = tone;
 
                 psg_write(drv, AY_AFINE + ch->channel_index * 2,
@@ -266,6 +276,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
         int wval;
         int nest;
         uint16_t offset;
+        int8_t detune, diff;
         switch (code) {
         case 0xea:    /* S コマンド */
              ch->eg_width_base = ch->data_base[ch->data_offset++];
@@ -397,10 +408,21 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
            ch->q_default = ch->data_base[ch->data_offset++];
            continue;
         case 0xfb:    /* U% コマンド */
-            (void)ch->data_base[ch->data_offset++];
+            ch->detune = ch->data_base[ch->data_offset++];
             continue;
         case 0xfc:    /* U+/- コマンド */
-            (void)ch->data_base[ch->data_offset++];
+            diff   = ch->data_base[ch->data_offset++];
+            detune = (int8_t)ch->detune;
+            if (((uint8_t)detune & 0x80u) != 0) {
+                detune = (int8_t)((uint8_t)detune & ~0x80u);
+                detune = -detune;
+            }
+            detune += diff;
+            if (detune < 0) {
+                detune = -detune;
+                detune = (int8_t)((uint8_t)detune | 0x80u);
+            }
+            ch->detune = (uint8_t)detune;
             continue;
         case 0xfd:    /* M% コマンド */
              ch->vib_delta_base = ch->data_base[ch->data_offset++];
