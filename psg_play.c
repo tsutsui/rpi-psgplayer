@@ -290,10 +290,10 @@ ui_note_event_cb(void *user, int ch, uint8_t octave, uint8_t note,
 }
 
 static void
-usage(const char *prog)
+usage(void)
 {
     fprintf(stderr,
-        "Usage: %s p6psgfile\n", prog);
+        "Usage: %s [-t title] p6psgfile\n", getprogname());
 
     exit(EXIT_FAILURE);
 }
@@ -301,9 +301,28 @@ usage(const char *prog)
 int
 main(int argc, char **argv)
 {
+    const char *ifname;
     const char *dev = "/dev/mem";
+    const char *title = NULL;
     PSGDriver psgdriver, *drv;
     UI_state uistate, *ui;
+
+    int ch;
+    while ((ch = getopt(argc, argv, "t:")) != -1) {
+        switch (ch) {
+        case 't':
+            title = optarg;
+            break;
+        default:
+            usage();
+        }
+    }
+    argc -= optind;
+    argv += optind;
+
+    if (argc != 1)
+        usage();
+    ifname = argv[0];
 
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -311,11 +330,8 @@ main(int argc, char **argv)
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
 
-    if (argc != 2)
-        usage(argv[0]);
-
     /* read P6 PSG data file */
-    FILE *p6psgfile = fopen(argv[1], "rb");
+    FILE *p6psgfile = fopen(ifname, "rb");
     if (p6psgfile == NULL) {
         die("fopen p6psgfile");
     }
@@ -443,7 +459,7 @@ main(int argc, char **argv)
             ui->have_prev = 0;
             g_redraw = 0;
         }
-        ui_maybe_render(ui, now, "OSC demo");
+        ui_maybe_render(ui, now, title != NULL ? title : "OSC demo");
     }
 
     psg_driver_stop(drv);
