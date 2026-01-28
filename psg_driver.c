@@ -89,6 +89,9 @@ psg_driver_init(PSGDriver *drv,
     drv->main.fade_step = 0;
     drv->main.fade_active = 0;
 
+    drv->main.tempo_val = 10;
+    drv->main.tempo_counter = drv->main.tempo_val;
+
     /*
      * enable tones (0..2 = 0)
      * disable noise (3..5 = 1)
@@ -341,7 +344,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             ch->lplus_default = ch->data_base[ch->data_offset++];
             continue;
         case 0xf8:    /* T コマンド */
-            (void)ch->data_base[ch->data_offset++]; /* テンポ値 */
+            drv->main.tempo_val = ch->data_base[ch->data_offset++]; /* テンポ値 */
             (void)ch->data_base[ch->data_offset++]; /* F6h 値 */
             continue;
         case 0xf9:    /* L コマンド */
@@ -384,13 +387,11 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
 void
 psg_driver_tick(PSGDriver *drv)
 {
-    drv->tick_count++;
-
-    if (drv->tick_count >= 9) {
+    if (drv->main.tempo_counter-- == 0) {
         for (int i = 0; i < 3; i++) {
             psg_channel_tick(drv, &drv->ch[i]);
         }
-    drv->tick_count = 0;
+        drv->main.tempo_counter = drv->main.tempo_val;
     }
 
     /* フェード等があればここで main ワークを更新（後で実装） */

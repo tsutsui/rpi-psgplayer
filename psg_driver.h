@@ -72,6 +72,9 @@ typedef struct PSGChannel {
 
 /* ドライバ全体のワーク */
 typedef struct PSGMainWork {
+    uint8_t tempo_val;
+    uint8_t tempo_counter;
+
     uint8_t fade_value;
     int8_t  fade_step;
     uint8_t fade_active;
