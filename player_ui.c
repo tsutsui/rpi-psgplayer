@@ -84,6 +84,13 @@ ui_term_apply(UI_state *ui)
         (void)tcsetattr(STDIN_FILENO, TCSANOW, &tio);
     }
 
+    /*
+     * genfb(4) + wsdisplay(4) だとカーソルを消してから alternate screen すると
+     * カーソルを消した位置でカーソル表示が出て残ってしまうっぽい（バグ?）ので
+     * 先に表示枠外に移動させておく
+     */
+    fputs("\033[24;1H", stdout);
+
     /* カーソル消す */
     fputs("\033[?25l", stdout);
     ui->cursor_hidden = 1;
