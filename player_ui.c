@@ -528,10 +528,10 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
     put_hex2h(frame[ROW_R6], COL_R7, ui->reg[7]);
 
     /* 8) draw: line-diff to reduce flicker */
-    fputs("\033[H", stdout); /* home */
 
     if (ui->have_prev == 0) {
         /* full draw first time */
+        fputs("\033[H", stdout);
         for (int r = 0; r < UI_ROWS; r++) {
             fputs(frame[r], stdout);
             fputc('\n', stdout);
