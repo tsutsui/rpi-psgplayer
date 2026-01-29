@@ -123,6 +123,9 @@ ui_init(UI_state *ui, uint64_t now_ns)
     /* alternate screen + clear */
     fputs("\033[?1049h\033[H\033[J", stdout);
 
+    /* 曲タイトル UTF-8 表示用の utf8_fit_cols() で必要 */
+    setlocale(LC_CTYPE, "");
+
     ui->initialized = 1;
 }
 
@@ -432,9 +435,6 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
 
     /* 3) Fill title (UTF-8) */
     {
-        /* ensure locale once (ok if called repeatedly, but you can move to init) */
-        setlocale(LC_CTYPE, "");
-
         char fitted[W_TITLE * 4 + 1];
         utf8_fit_cols(fitted, sizeof(fitted), (title ? title : "(no title)"), W_TITLE);
 
