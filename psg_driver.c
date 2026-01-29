@@ -197,13 +197,15 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
     /* ノート再生中の処理 */
     if (ch->wait_counter > 0) {
         ch->wait_counter--;
-        if (ch->wait_counter <= ch->q_default) {
+        if ((ch->flags & CH_F_TIE) == 0 && ch->wait_counter <= ch->q_default) {
             /* とりあえずゲートタイム過ぎていたらボリューム0で音を切る */
             psg_write(drv, AY_AVOL + ch->channel_index, 0);
         }
         /* ノート継続なら終了 */
         if (ch->wait_counter > 0)
             return;
+        /* ノート終了時はタイフラグをクリアして次コマンド解析 */
+        ch->flags &= ~CH_F_TIE;
     }
 
     /* 次のオブジェクトを読み取るループ。
@@ -211,12 +213,12 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
     for (;;) {
         uint8_t code = ch->data_base[ch->data_offset++];
 
-        if ((code & 0x80) == 0) {
+        if ((code & F_NOTE) == 0) {
             /* === 音符オブジェクト === */
 
-            uint8_t note     = code & 0x0F;
-            uint8_t len_flag = (code >> 4) & 0x03;
-            /* bit6 のタイは Stage 1 では無視 */
+            uint8_t note     = code & F_PITCH;
+            uint8_t len_flag = (code & F_LEN) >> 4;
+            int tie = (code & F_TIE) ? 1 : 0;
 
             uint16_t len = 0;
 
@@ -237,6 +239,10 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             }
 
             ch->wait_counter = len;
+            if (tie)
+                ch->flags |= CH_F_TIE;
+            else
+                ch->flags &= ~CH_F_TIE;
 
             if (note == 0) {
                 /* 休符：ボリューム0で待つ */
@@ -358,7 +364,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             continue;
 
         case 0xf0:    /* [ コマンド */
-            nest = ch->flags & 0x7u;
+            nest = ch->flags & CH_F_NEST;
             if (nest >= 4) {
                 /* コンパイル時にチェックされているはずだが一応 */
                 (void)ch->data_base[ch->data_offset++];
@@ -379,7 +385,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             } else {
                 offset |= 0xFF00u;
             }
-            nest = ch->flags & 0x7u;
+            nest = ch->flags & CH_F_NEST;
             if (nest == 0) {
                 /* コンパイル時にチェックされているはずだが一応 */
                 continue;
@@ -399,7 +405,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
         case 0xf3:    /* : コマンド */
             offset  = ch->data_base[ch->data_offset++];
             offset |= ch->data_base[ch->data_offset++] << 8;
-            nest = ch->flags & 0x7;
+            nest = ch->flags & CH_F_NEST;
             if (nest > 4 || nest == 0) {
                 /* コンパイル時にチェックされているはずだが一応 */
                 continue;

@@ -16,10 +16,19 @@ typedef void (*PSGNoteEventFn)(void *user, int ch,
                               uint8_t volume, uint16_t len,
                               uint8_t is_rest, uint16_t bpm_x10);
 
+/* コマンド/ノートのオブジェクトデータ定義 */
+#define F_NOTE          0x80u       /* 0:音符,休符, 1:コマンド */
+#define F_TIE           0x40u       /* 0:タイなし, 1:タイあり */
+#define F_LEN           0x30u       /* 00b:音長なし音符（Lコマンド音長）
+                                       01b:音長なし音符（L+コマンド音長）
+                                       10b:音長あり音符（音長１バイト）
+                                       11b:音長あり音符（音長２バイト） */
+#define F_PITCH         0x0fu       /* 0:休符, 1〜12:ド(C)〜シ(B) */
+
 /* チャンネルワーク（Z80 IY+0x00〜0x27 に対応するログical構造） */
 typedef struct PSGChannel {
-    const uint8_t *data_base;   /* HL が指すオブジェクトデータ先頭 */
-    uint16_t       data_offset; /* HL 相当 */
+    const uint8_t *data_base;       /* HL が指すオブジェクトデータ先頭 */
+    uint16_t       data_offset;     /* HL 相当 */
 
     uint16_t       wait_counter;    /* 音長カウンタ */
 
@@ -32,6 +41,12 @@ typedef struct PSGChannel {
     uint8_t        q_counter;       /* Q カウンタ現在値 */
 
     uint8_t        flags;           /* 各種フラグ (bit7..bit0) */
+#define CH_F_REST       0x80u       /* 休符 */
+#define CH_F_VIB_ON     0x40u       /* ビブラート有無 */
+#define CH_F_VIB_PM     0x20u       /* ビブラート+/- */
+#define CH_F_PSG_EG     0x10u       /* PSG-EGフラグ (第4パラメータ以降使用) */
+#define CH_F_TIE        0x08u       /* タイフラグ */
+#define CH_F_NEST       0x07u       /* ネストカウンタ */
 
     uint8_t        detune;          /* デチューン補正値 (bit7:±, bit6..0:値)*/
 
