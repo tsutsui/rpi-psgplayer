@@ -279,12 +279,13 @@ psg_write_reg(void *user, uint8_t reg, uint8_t val)
 
 static void
 ui_note_event_cb(void *user, int ch, uint8_t octave, uint8_t note,
-                 uint8_t volume, uint16_t len, uint8_t is_rest)
+                 uint8_t volume, uint16_t len, uint8_t is_rest,
+                 uint16_t bpm_x10)
 {
     PSGDriver *drv = user;
     UI_state *ui = drv->note_user;
     uint64_t now = nsec_now_monotonic();
-    ui_on_note_event(ui, now, ch, octave, note, volume, len, is_rest);
+    ui_on_note_event(ui, now, ch, octave, note, volume, len, is_rest, bpm_x10);
 }
 
 static void

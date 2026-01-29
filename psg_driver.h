@@ -14,7 +14,7 @@ typedef void (*PSGWriteRegFn)(void *user, uint8_t reg, uint8_t val);
 typedef void (*PSGNoteEventFn)(void *user, int ch,
                               uint8_t octave, uint8_t note,
                               uint8_t volume, uint16_t len,
-                              uint8_t is_rest);
+                              uint8_t is_rest, uint16_t bpm_x10);
 
 /* チャンネルワーク（Z80 IY+0x00〜0x27 に対応するログical構造） */
 typedef struct PSGChannel {
@@ -83,6 +83,8 @@ typedef struct PSGMainWork {
     uint8_t reg7_value;             /* レジスタ7 (AY_ENABLE) 書き込み値 */
 
     uint8_t i_command_value;        /* I コマンドで書き込まれた値 */
+
+    uint16_t bpm_x10;
 } PSGMainWork;
 
 /* PSG ドライバ本体 */

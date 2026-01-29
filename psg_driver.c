@@ -35,6 +35,34 @@ psg_calc_tone(uint8_t octave, uint8_t note)
     return base;
 }
 
+/* ドライバテンポ値から bpm値を算出 */
+static inline uint16_t
+calc_bpm_x10_from_t96(uint8_t t96)
+{
+    if (t96 == 0)
+        return 0;
+    /*
+     * 1分 (60秒) あたりの4分音符数を bpm として表示する。
+     *  - 4分音符は 96分音符の 24個分
+     *  - 96分音符の長さ（秒）: (t96 × tick_ms) / 1000
+     *  - 4分音符の長さ（秒） :   24 × [96分音符の長さ（秒）]
+                                = 24 × (t96 × tick_ms / 1000)
+     *  - 4分音符基準 bpm     : 60 / [4分音符の長さ（秒）]
+     *
+     * よって
+     *  bpm = 60 / (24 × (t96 × tick_ms) / 1000)
+     *      = (60 * 1000 / 24) / (t96 × tick_ms)
+     *      = 2500 / (t96 × tick_ms)
+     *
+     * tick_ms = 2 [ms] の場合、かつ、四捨五入の 1/2 を分子に足すと
+     *  bpm = (1250 + (t96 / 2)) / t96
+     *
+     * ここでは小数点以下1桁まで出す (x10) ので1桁増やして以下
+     *  bpm_x10 = (1250 * 10 + (t96 / 2)) / t96
+     */
+    return (uint16_t)((12500u + (t96 / 2u)) / t96);
+}
+
 /* PSG レジスタ書き込みヘルパ */
 static inline void
 psg_write(PSGDriver *drv, uint8_t reg, uint8_t val)
@@ -47,10 +75,10 @@ psg_write(PSGDriver *drv, uint8_t reg, uint8_t val)
 /* デモ画面表示用ノートデータ書き込み */
 static inline void
 psg_note_event(PSGDriver *drv, int ch, uint8_t octave, uint8_t note,
-               uint8_t volume, uint16_t len, uint8_t is_rest)
+               uint8_t volume, uint16_t len, uint8_t is_rest, uint16_t bpm_x10)
 {
     if (drv->note_event) {
-        (*drv->note_event)(drv, ch, octave, note, volume, len, is_rest);
+        (*drv->note_event)(drv, ch, octave, note, volume, len, is_rest, bpm_x10);
     }
 }
 
@@ -91,7 +119,7 @@ psg_driver_init(PSGDriver *drv,
 
     drv->main.tempo_val = 10;
     drv->main.tempo_counter = drv->main.tempo_val;
-
+    drv->main.bpm_x10 = calc_bpm_x10_from_t96(drv->main.tempo_val);
     /*
      * enable tones (0..2 = 0)
      * disable noise (3..5 = 1)
@@ -213,13 +241,15 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             if (note == 0) {
                 /* 休符：ボリューム0で待つ */
                 psg_note_event(drv, ch->channel_index,
-                               ch->octave, 0, ch->volume, (uint16_t)len, 1);
+                               ch->octave, 0, ch->volume, (uint16_t)len, 1,
+                               drv->main.bpm_x10);
                 psg_write(drv, AY_AVOL + ch->channel_index, 0);
             } else {
                 /* 通常の音符 */
 
                 psg_note_event(drv, ch->channel_index,
-                               ch->octave, note, ch->volume, (uint16_t)len, 0);
+                               ch->octave, note, ch->volume, (uint16_t)len, 0,
+                               drv->main.bpm_x10);
                 uint16_t tone = psg_calc_tone(ch->octave, note);
                 if (ch->detune != 0) {
                     /* デチューン分調整 */
@@ -276,6 +306,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
         int wval;
         int nest;
         uint16_t offset;
+        uint8_t t96;
         int8_t detune, diff;
         switch (code) {
         case 0xea:    /* S コマンド */
@@ -398,8 +429,10 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             ch->lplus_default = ch->data_base[ch->data_offset++];
             continue;
         case 0xf8:    /* T コマンド */
-            drv->main.tempo_val = ch->data_base[ch->data_offset++]; /* テンポ値 */
-            (void)ch->data_base[ch->data_offset++]; /* F6h 値 */
+            t96 = ch->data_base[ch->data_offset++]; /* 96分音符長の 2ms回数 */
+            (void)ch->data_base[ch->data_offset++]; /* P6ポートF6h値 (無視) */
+            drv->main.tempo_val = t96;
+            drv->main.bpm_x10   = calc_bpm_x10_from_t96(t96); /* ui 表示用 */
             continue;
         case 0xf9:    /* L コマンド */
             ch->l_default = ch->data_base[ch->data_offset++];

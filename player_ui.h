@@ -21,6 +21,9 @@ typedef struct {
     /* music state per channel (from driver) */
     UI_music_ch mus[3];
 
+    /* music tempo in bpm x10 (from driver) */
+    uint16_t bpm_x10;
+
     /* minimal reg shadow for mixer/noise display */
     uint8_t reg[16];
     uint8_t noise_period;      /* reg[6] & 0x1f */
@@ -49,7 +52,8 @@ void ui_on_reg_write(UI_state *ui, uint8_t reg, uint8_t val);
 /* called from driver when a note/rest is committed */
 void ui_on_note_event(UI_state *ui, uint64_t now_ns, int ch,
                          uint8_t octave, uint8_t note,
-                         uint8_t volume, uint16_t len, uint8_t is_rest);
+                         uint8_t volume, uint16_t len, uint8_t is_rest,
+                         uint16_t bpm_x10);
 
 /* ANSI UI init/shutdown */
 void ui_init(UI_state *ui, uint64_t now_ns);

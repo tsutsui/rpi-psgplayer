@@ -49,7 +49,7 @@ ui_on_reg_write(UI_state *ui, uint8_t reg, uint8_t val)
 void
 ui_on_note_event(UI_state *ui, uint64_t now_ns, int ch,
     uint8_t octave, uint8_t note, uint8_t volume,
-    uint16_t len, uint8_t is_rest)
+    uint16_t len, uint8_t is_rest, uint16_t bpm_x10)
 {
     if (ch < 0 || ch >= 3)
         return;
@@ -60,6 +60,8 @@ ui_on_note_event(UI_state *ui, uint64_t now_ns, int ch,
     m->volume = volume & 0x0f;
     m->len    = len;
     m->is_rest = is_rest ? 1 : 0;
+
+    ui->bpm_x10 = bpm_x10;
 }
 
 static void
@@ -148,13 +150,13 @@ ui_shutdown(UI_state *ui)
 /* ---- 固定テンプレ（79桁×23行） ---- */
 
 static const char *ui_tmpl[UI_ROWS] = {
-/* 0000000001111111111222222222233333333334444444444555555555566666666667777777777 */
-/* 1234567890123456789012345678901234567890123456789012345678901234567890123456789 */
+/* 0000000000111111111122222222223333333333444444444455555555556666666666777777777 */
+/* 0123456789012345678901234567890123456789012345678901234567890123456789012345678 */
   "+-----------------------------------------------------------------------------+", /*  1 */
   "| YM2149 P6 PSG Player on Raspberry Pi 3B @ Open Source Conference Osaka 2026 |", /*  2 */
   "| Clock: 2.000 MHz, Rate: 2ms/tick, BCM2837 GPIO controlled by NetBSD/evbarm  |", /*  3 */
   "+-----------------------------------------------------------------------------+", /*  4 */
-  "| Music Title: _____________________________________  t=_____._s  tick=_____  |", /*  5 */
+  "| Music Title: _____________________________________    bpm=___._  t=_____._s |", /*  5 */
   "+-----------------------------------------------------------------------------+", /*  6 */
   "| Ch A: NOTE=--   ---.-Hz  VOL=__ [...............]  TONE=ON   NOISE=OFF      |", /*  7 */
   "| Ch B: NOTE=--   ---.-Hz  VOL=__ [...............]  TONE=ON   NOISE=OFF      |", /*  8 */
@@ -397,11 +399,11 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
     const int COL_TITLE = 15;      /* after "| Music Title: " */
     const int W_TITLE   = 38;      /* number of '_' in template */
 
-    /* t=xxx.xs and tick= */
-    const int COL_TSEC  = 56;      /* points to first digit in "t=12345.6s" */
-    const int COL_TICK  = 71;      /* points to first digit in "tick=61700" */
+    /* bpm=xxx and t=xxxxx.xs */
+    const int COL_TEMPO = 60;      /* points to first digit in "TEMPO=120.0" */
+    const int W_TEMPO   = 5;       /* "120.0" */
+    const int COL_TSEC  = 69;      /* points to first digit in "t=12345.6s" */
     const int W_TSEC    = 7;       /* "12345.6" */
-    const int W_TICK    = 5;       /* adjust if you want 6; template shows 61700 */
 
     /* Channel rows */
     const int ROW_CH[3] = { 6, 7, 8 };
@@ -442,17 +444,16 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
         put_bytes(frame[ROW_TITLE], COL_TITLE, fitted);
     }
 
-    /* 4) time and tick */
+    /* 4) bpm and time */
     {
+        /* bpm is calculated in driver from tempo */
+        double bpm = ui->bpm_x10 / 10.0;
+        /* overwrite digits only */
+        put_f1_r(frame[ROW_TITLE], COL_TEMPO, W_TEMPO, bpm);
+
         double tsec = (double)(now_ns - ui->start_ns) / 1e9;
         /* overwrite digits only; keep "t=" and "s" fixed */
         put_f1_r(frame[ROW_TITLE], COL_TSEC, W_TSEC, tsec);
-
-        /* tick: show ui->tick_count if you have it; otherwise 0 */
-        uint32_t tick = 0;
-        /* If your driver exposes tick_count, pass it via UI_state; here assume ui->tick_count exists */
-        /* tick = (uint32_t)ui->some_tick_counter; */
-        put_u32_r(frame[ROW_TITLE], COL_TICK, W_TICK, tick);
     }
 
     /* 5) channel lines: NOTE/Hz/VOL/bar/TONE/NOISE */
