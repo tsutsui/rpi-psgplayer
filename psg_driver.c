@@ -452,7 +452,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
 void
 psg_driver_tick(PSGDriver *drv)
 {
-    if (drv->main.tempo_counter-- == 0) {
+    if (--drv->main.tempo_counter == 0) {
         for (int i = 0; i < 3; i++) {
             psg_channel_tick(drv, &drv->ch[i]);
         }
