@@ -370,6 +370,22 @@ piano_plot_col(uint8_t octave, uint8_t note /*1..12*/)
     return x;
 }
 
+static int
+piano_plot_col_noise(uint8_t reg6)
+{
+    /*
+     * ノイズのみの時はMMLのノートは意味がない一方で
+     * Reg6のノイズ周波数は聴感とは一致しないので
+     * ピアノロールはノイズ設定の Reg6値で適当に散らす。
+     * Reg6の値が大きいほど低く聞こえるので Reg6 31..0 の並びを
+     * O3Cから配置してみる。
+     *
+     * プロット領域左端 col=3 (0-origin) の位置が O1E (octave=1, note=5) で
+     * O3C の位置はそこから +8 +12 なので +20 する
+     */
+    return 3 + 8 + 12 + (31 - reg6);
+}
+
 /* ---- ここからが差し替え対象の ui_render() 本体 ---- */
 
 /*
@@ -461,9 +477,17 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
     for (int ch = 0; ch < 3; ch++) {
         int row = ROW_CH[ch];
 
+        /* 「トーン無しノイズのみ」の判定用 */
+        int noise_only =
+          (ui->tone_enable[ch] == 0) && (ui->noise_enable[ch] != 0);
+
         /* NOTE */
         char nbuf[4];
         make_note_ascii(nbuf, ui->mus[ch].octave, ui->mus[ch].note, ui->mus[ch].is_rest);
+        if (noise_only && (ui->mus[ch].volume != 0)) {
+            /* ノイズのみの時はMMLのノートは意味がないので別表示にする */
+            strcpy(nbuf, "NOI");
+        }
         put_spaces(frame[row], COL_NOTE, W_NOTE);
         put_bytes(frame[row], COL_NOTE, nbuf);
 
@@ -475,7 +499,8 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
         if (ui->mus[ch].is_rest ||
             ui->mus[ch].note == 0 ||
             ui->mus[ch].volume == 0 ||
-            period == 0) {
+            period == 0 ||
+            noise_only) {
             put_bytes(frame[row], COL_HZ, " -----");
         } else {
             double hz = psg_period_to_hz(period, clock_hz);
@@ -504,11 +529,17 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
           ui->mus[ch].volume == 0)
             continue;
 
+        int noise_only =
+          (ui->tone_enable[ch] == 0) && (ui->noise_enable[ch] != 0);
+
         int x = piano_plot_col(ui->mus[ch].octave, ui->mus[ch].note);
+        if (noise_only) {
+            x = piano_plot_col_noise(ui->reg[6]);
+        }
         if (x < 0)
             continue;
 
-        char mark = (ch == 0) ? 'A' : (ch == 1) ? 'B' : 'C';
+        char mark = noise_only ? 'N' : (ch == 0) ? 'A' : (ch == 1) ? 'B' : 'C';
         frame[row][x] = mark;
     }
 
