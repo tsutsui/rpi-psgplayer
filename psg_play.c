@@ -188,7 +188,7 @@ ctrl_write_data(void)
 static void
 ym_reset_pulse(void)
 {
-    /* assume active-low reset */
+    /* RESETはアクティブHigh想定 (I/F回路はオープンコレクタTr経由で駆動) */
     gpio_write_masks(0, MASK_RESET);      /* deassert = 0 */
     sleep_us(10);
     gpio_write_masks(MASK_RESET, 0);      /* assert = 1 */
@@ -207,8 +207,6 @@ ym_latch_addr(uint8_t reg)
     ctrl_latch_addr();
     ctrl_latch_addr();
     ctrl_latch_addr();
-    /* timing is extremely relaxed compared to chip requirements */
-    //sleep_us(1);
     mmio_barrier();
     ctrl_inactive();
     mmio_barrier();
