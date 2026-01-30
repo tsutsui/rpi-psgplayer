@@ -72,6 +72,114 @@ psg_write(PSGDriver *drv, uint8_t reg, uint8_t val)
     }
 }
 
+/* 周波数レジスタ書き込み用ヘルパ */
+static inline uint16_t
+psg_clamp_tone_12bit(int32_t t)
+{
+    if (t < 1)
+        return 1;
+    if (t > 0x0fff)
+        return 0x0fff;
+    return (uint16_t)t;
+}
+
+static inline void
+psg_write_tone(PSGDriver *drv, PSGChannel *ch, uint16_t tone)
+{
+    const uint8_t base = (uint8_t)(AY_AFINE + ch->channel_index * 2);
+    psg_write(drv, base + 0, (uint8_t)(tone & 0xff));
+    psg_write(drv, base + 1, (uint8_t)((tone >> 8) & 0x0f));
+}
+
+/* ビブラート処理ヘルパ */
+#define KEEP_VIBRATO_TIE
+
+/* ノート開始時のLFO初期化 */
+static void
+psg_vibrato_note_init(PSGChannel *ch)
+{
+    /* 補正値クリア */
+    ch->vib_offset = 0;
+
+    /* wait/count のワーク初期化 */
+    ch->vib_wait_work = ch->vib_wait_base;
+    ch->vib_count_work  = ch->vib_count_base;
+    if (ch->vib_count_work == 0)
+        ch->vib_count_work = 1; /* 安全策：0は暴走しやすいので1扱い */
+
+    /*
+     * ビブラート振幅初回は 0〜90°までなので 1/2 する
+     */
+    ch->vib_amp_work = (uint8_t)(ch->vib_amp_base >> 1);
+
+    /*
+     * 第4パラメータの bit7 で初期方向を決める
+     *  - bit7=1: '-'（bit5=0）
+     *  - bit7=0: '+'（bit5=1）
+     *
+     * CH_F_VIB_PM(=bit5相当) が 1 のとき
+     * 「ピッチ+方向」＝トーン周期を減算（周波数は上がる）
+     * で合わせる
+     */
+    if (((uint8_t)ch->vib_delta_base & 0x80u) != 0) {
+        ch->flags &= ~CH_F_VIB_PM; /* '-' */
+    } else {
+        ch->flags |=  CH_F_VIB_PM; /* '+' */
+    }
+}
+
+/* 発声中のLFO処理 */
+static void
+psg_vibrato_tick(PSGDriver *drv, PSGChannel *ch)
+{
+    if ((ch->flags & CH_F_VIB_ON) == 0)
+        return;
+
+    /* waitディレイカウント */
+    if (ch->vib_wait_work != 0) {
+        ch->vib_wait_work--;
+        return;
+    }
+
+    /* 周期カウント */
+    if (--ch->vib_count_work != 0)
+        return;
+    ch->vib_count_work = ch->vib_count_base;
+    if (ch->vib_count_work == 0)
+        ch->vib_count_work = 1;
+
+    /* step量を方向に応じて加減算 */
+    int step = (int)((uint8_t)ch->vib_delta_base & 0x7fu);
+    if (step != 0) {
+        if ((ch->flags & CH_F_VIB_PM) != 0) {
+            /* '+'方向：トーン周期を減らす（周波数は上がる）＝補正を負方向へ */
+            ch->vib_offset -= step;
+        } else {
+            /* '-'方向：トーン周期を増やす（周波数は下がる） */
+            ch->vib_offset += step;
+        }
+    }
+
+    /* 基準周波数 + 補正 を書き込み */
+    {
+        int32_t t = (int32_t)ch->freq_value + (int32_t)ch->vib_offset;
+        uint16_t tone = psg_clamp_tone_12bit(t);
+        psg_write_tone(drv, ch, tone);
+    }
+
+    /* 振幅ありのとき、amp_work で方向反転 */
+    if (ch->vib_amp_base != 0) {
+        if (ch->vib_amp_work != 0)
+            ch->vib_amp_work--;
+        if (ch->vib_amp_work == 0) {
+            /* 2回目以降のカウンタは180°分なのでストア時に2倍した値を使う */
+            ch->vib_amp_work = ch->vib_amp_base;
+            /* ビブラート方向反転 */
+            ch->flags ^= CH_F_VIB_PM;
+        }
+    }
+}
+
 /* デモ画面表示用ノートデータ書き込み */
 static inline void
 psg_note_event(PSGDriver *drv, int ch, uint8_t octave, uint8_t note,
@@ -211,7 +319,8 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             return;
         }
 
-        /* 発声中ビブラート (LFO) 処理（未実装） */
+        /* 発声中ビブラート (LFO) 処理 */
+        psg_vibrato_tick(drv, ch);
 
         if (ch->eg_width_base != 0) {
             /* 発声中ソフトウェアエンベロープ (EG) 処理 */
@@ -371,7 +480,13 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
                 }
 
                 if ((ch->flags & CH_F_VIB_ON) != 0) {
-                    /* ビブラート (LFO) ワーク初期化（未実装） */
+                    /* ビブラート (LFO) ワーク初期化 */
+#ifdef KEEP_VIBRATO_TIE
+                    if (!prev_tie)
+#endif
+                    {
+                        psg_vibrato_note_init(ch);
+                    }
                 }
 
                 /* 周波数レジスタ値算出 */
@@ -396,10 +511,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
                 ch->freq_value = tone;
 
                 /* 周波数レジスタセット */
-                psg_write(drv, AY_AFINE + ch->channel_index * 2,
-                    (uint8_t)(tone & 0xFF));
-                psg_write(drv, AY_ACOARSE + ch->channel_index * 2,
-                    (uint8_t)((tone >> 8) & 0x0F));
+                psg_write_tone(drv, ch, tone);
 
                 /* 音量レジスタセット */
                 int vol = ch->volume;
@@ -456,7 +568,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             continue;
         }
 
-        uint8_t p1;
+        uint8_t p1, p3;
         uint8_t reg6, reg7;
         uint32_t tbit, nbit;
         int wval;
@@ -573,11 +685,19 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             drv->main.i_command_value = ch->data_base[ch->data_offset++];
             continue;
         case 0xf5:    /* M コマンド */
-             ch->vib_weight_base = ch->data_base[ch->data_offset++];
+             ch->vib_wait_base = ch->data_base[ch->data_offset++];
              ch->vib_count_base = ch->data_base[ch->data_offset++];
-             ch->vib_amp_base = ch->data_base[ch->data_offset++];
-             ch->vib_delta_base = ch->data_base[ch->data_offset++];
+             p3 = ch->data_base[ch->data_offset++];
+             ch->vib_amp_base = (uint8_t)(p3 * 2);
+             ch->vib_delta_base = (int8_t)ch->data_base[ch->data_offset++];
              /* 第4パラメータでビブラートフラグセットクリア */
+             if (ch->vib_delta_base != 0)
+                 ch->flags |= CH_F_VIB_ON;
+             else
+                 ch->flags &= ~CH_F_VIB_ON;
+#ifdef KEEP_VIBRATO_TIE
+            psg_vibrato_note_init(ch);
+#endif
             continue;
         case 0xf6:    /* N コマンド */
             /* ビブラート効果の有効／無効スイッチ */
@@ -615,8 +735,12 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             ch->detune = (uint8_t)detune;
             continue;
         case 0xfd:    /* M% コマンド */
-             ch->vib_delta_base = ch->data_base[ch->data_offset++];
+             ch->vib_delta_base = (int8_t)ch->data_base[ch->data_offset++];
              /* 第4パラメータでビブラートフラグセットクリア */
+             if (ch->vib_delta_base != 0)
+                 ch->flags |= CH_F_VIB_ON;
+             else
+                 ch->flags &= ~CH_F_VIB_ON;
             continue;
         case 0xfe:    /* J コマンド */
             ch->j_return_offset = ch->data_offset;

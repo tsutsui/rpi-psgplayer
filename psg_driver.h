@@ -59,13 +59,13 @@ typedef struct PSGChannel {
 
     int16_t        vib_offset;      /* ビブラート補正値 */
 
-    uint8_t        vib_weight_base;
-    uint8_t        vib_weight_work;
-    uint8_t        vib_count_base;
-    uint8_t        vib_count_work;
-    uint8_t        vib_amp_base;
-    uint8_t        vib_amp_work;
-    int8_t         vib_delta_base;
+    uint8_t        vib_wait_base;   /* ビブラートウェイト(p1)元値 */
+    uint8_t        vib_wait_work;   /* ビブラートウェイトワーク */
+    uint8_t        vib_count_base;  /* ビブラートカウンタ(p2)元値 */
+    uint8_t        vib_count_work;  /* ビブラートカウンタワーク */
+    uint8_t        vib_amp_base;    /* ビブラート振幅回数(p3)元値 */
+    uint8_t        vib_amp_work;    /* ビブラート振幅回数ワーク */
+    int8_t         vib_delta_base;  /* ビブラート増減値(p4)元値 */
 
     uint8_t        l_backup;
     uint8_t        lplus_backup;
