@@ -71,15 +71,15 @@ typedef struct PSGChannel {
     uint8_t        lplus_backup;
     uint8_t        octave_backup;
 
-    uint8_t        eg_count_base;
-    uint8_t        eg_count_work;
-    int8_t         eg_width_base;
-    int8_t         eg_width_work;
-    int8_t         eg_delta_base;
-    int8_t         eg2_width_base;
-    int8_t         eg2_count_base;
+    uint8_t        eg_count_base;   /* PSG-EGカウンタ(p2)元値  */
+    uint8_t        eg_count_work;   /* PSG-EGカウンタワーク  */
+    int8_t         eg_width_base;   /* PSG音量幅カウンタ(p1)元値 */
+    int8_t         eg_width_work;   /* PSG音量幅カウンタワーク/2ndカウンタワーク */
+    int8_t         eg_delta_base;   /* PSG-EG増減値(p3)元値 */
+    int8_t         eg2_width_base;  /* 2nd音量幅(p4)元値 */
+    int8_t         eg2_count_base;  /* 2ndカウンタ(p5)元値 */
 
-    int8_t         volume_adjust;
+    int8_t         volume_adjust;   /* 音量補正値 */
 
     /* C版独自の補助情報 */
     uint8_t        channel_index;   /* 0,1,2 など */
