@@ -309,7 +309,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
                 }
 
                 /* 前ノートがタイでない場合は書き込み前にボリュームオフ */
-                if (!tie)
+                if ((ch->flags & CH_F_TIE) == 0)
                     psg_write(drv, AY_AVOL + ch->channel_index, 0);
 
                 /* 現在の基準トーン値セット */
