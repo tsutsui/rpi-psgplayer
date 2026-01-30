@@ -19,10 +19,11 @@ typedef void (*PSGNoteEventFn)(void *user, int ch,
 /* コマンド/ノートのオブジェクトデータ定義 */
 #define F_NOTE          0x80u       /* 0:音符,休符, 1:コマンド */
 #define F_TIE           0x40u       /* 0:タイなし, 1:タイあり */
-#define F_LEN           0x30u       /* 00b:音長なし音符（Lコマンド音長）
-                                       01b:音長なし音符（L+コマンド音長）
-                                       10b:音長あり音符（音長１バイト）
-                                       11b:音長あり音符（音長２バイト） */
+#define F_LEN           0x30u       /* 音長フラグ */
+#define F_LEN_L         0x00u       /* 00b:音長なし音符（Lコマンド音長） */
+#define F_LEN_LPLUS     0x10u       /* 01b:音長なし音符（L+コマンド音長） */
+#define F_LEN_1BYTE     0x20u       /* 10b:音長あり音符（音長１バイト） */
+#define F_LEN_2BYTE     0x30u       /* 11b:音長あり音符（音長２バイト） */
 #define F_PITCH         0x0fu       /* 0:休符, 1〜12:ド(C)〜シ(B) */
 
 /* チャンネルワーク（Z80 IY+0x00〜0x27 に対応するログical構造） */

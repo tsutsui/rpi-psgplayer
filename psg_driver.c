@@ -150,7 +150,7 @@ psg_driver_set_channel_data(PSGDriver *drv,
 
     ch->data_base   = data;
     ch->data_offset = 0;
-    ch->wait_counter = 0;
+    ch->wait_counter = 1;
     ch->active       = 1;
 }
 
@@ -160,7 +160,6 @@ psg_driver_start(PSGDriver *drv)
 {
     for (int i = 0; i < 3; i++) {
         PSGChannel *ch = &drv->ch[i];
-        ch->wait_counter = 0;
         ch->active       = (ch->data_base != NULL) ? 1 : 0;
     }
 }
@@ -172,7 +171,6 @@ psg_driver_stop(PSGDriver *drv)
     for (int i = 0; i < 3; i++) {
         PSGChannel *ch = &drv->ch[i];
         ch->active       = 0;
-        ch->wait_counter = 0;
 
         /* ボリューム0を書いてミュート */
         psg_write(drv, AY_AVOL + i, 0);
@@ -194,19 +192,34 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
         return;
     }
 
-    /* ノート再生中の処理 */
-    if (ch->wait_counter > 0) {
-        ch->wait_counter--;
-        if ((ch->flags & CH_F_TIE) == 0 && ch->wait_counter <= ch->q_default) {
-            /* とりあえずゲートタイム過ぎていたらボリューム0で音を切る */
-            psg_write(drv, AY_AVOL + ch->channel_index, 0);
-        }
-        /* ノート継続なら終了 */
-        if (ch->wait_counter > 0)
+    uint8_t wait_counter = ch->wait_counter;
+    wait_counter--;
+    ch->wait_counter = wait_counter;
+
+    if (wait_counter > 0) {
+        /* ノート再生中の処理 */
+
+        /* 休符中は再生中処理なしで終了 */
+        if ((ch->flags & CH_F_REST) != 0)
             return;
-        /* ノート終了時はタイフラグをクリアして次コマンド解析 */
-        ch->flags &= ~CH_F_TIE;
+
+        if (ch->wait_counter == ch->q_counter) {
+            /* 残り時間がゲート時間になったら音量オフ */
+            psg_write(drv, AY_AVOL + ch->channel_index, 0);
+            /* 後は休符相当で発声処理なしなので休符フラグセットしてリターン */
+            ch->flags |= CH_F_REST;
+            return;
+        }
+
+        /* 発声中ビブラート (LFO) 処理（未実装） */
+
+        /* 発声中ソフトウェアエンベロープ (EG) 処理（未実装） */
+
+        /* ノート継続なので終了 */
+        return;
     }
+
+    /* ノート終了時は次コマンド解析 */
 
     /* 次のオブジェクトを読み取るループ。
        コマンドだけが連続する場合を考慮して、音符を読むまで回す。 */
@@ -216,47 +229,74 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
         if ((code & F_NOTE) == 0) {
             /* === 音符オブジェクト === */
 
-            uint8_t note     = code & F_PITCH;
-            uint8_t len_flag = (code & F_LEN) >> 4;
             int tie = (code & F_TIE) ? 1 : 0;
+
+            /* ゲートオフ時間設定 */
+            uint8_t q_counter = ch->q_default; 
+            if (tie)
+                q_counter = 0;
+
+            uint8_t note     = code & F_PITCH;
+            uint8_t len_flag = code & F_LEN;
 
             uint16_t len = 0;
 
             switch (len_flag) {
-            case 0x0: /* L デフォルト */
+            case F_LEN_L: /* L デフォルト */
                 len = ch->l_default;
                 break;
-            case 0x1: /* L+ デフォルト */
+            case F_LEN_LPLUS: /* L+ デフォルト */
                 len = ch->lplus_default;
                 break;
-            case 0x2: /* 1バイト音長 */
+            case F_LEN_1BYTE: /* 1バイト音長 */
                 len = ch->data_base[ch->data_offset++];
                 break;
-            case 0x3: /* 2バイト音長 (little endian) */
+            case F_LEN_2BYTE: /* 2バイト音長 (little endian) */
                 len  = ch->data_base[ch->data_offset++];
                 len |= (uint16_t)ch->data_base[ch->data_offset++] << 8;
                 break;
             }
 
+            /* 音長カウンタセット */
             ch->wait_counter = len;
-            if (tie)
-                ch->flags |= CH_F_TIE;
-            else
-                ch->flags &= ~CH_F_TIE;
+
+            /* ゲートオフ時間が発声時間より長い場合も1tickは発声させる */
+            if (q_counter >= len)
+                q_counter = len - 1;
+            /* Q カウンタ現在値セット */
+            ch->q_counter = q_counter;
 
             if (note == 0) {
-                /* 休符：ボリューム0で待つ */
+                /* 休符 */
+
+                /* 休符フラグセット */
+                ch->flags |= CH_F_REST;
+
+                /* 音量0を書き込み */
+                psg_write(drv, AY_AVOL + ch->channel_index, 0);
+
+                /* ui 表示用ノートイベント更新 */
                 psg_note_event(drv, ch->channel_index,
                                ch->octave, 0, ch->volume, (uint16_t)len, 1,
                                drv->main.bpm_x10);
-                psg_write(drv, AY_AVOL + ch->channel_index, 0);
+
             } else {
                 /* 通常の音符 */
 
-                psg_note_event(drv, ch->channel_index,
-                               ch->octave, note, ch->volume, (uint16_t)len, 0,
-                               drv->main.bpm_x10);
+                /* 休符フラグクリア */
+                ch->flags &= ~CH_F_REST;
+
+                if ((ch->flags & CH_F_TIE) == 0) {
+                    /* ソフトウェアエンベロープ (EG) ワーク初期化（未実装） */
+                }
+
+                if ((ch->flags & CH_F_VIB_ON) != 0) {
+                    /* ビブラート (LFO) ワーク初期化（未実装） */
+                }
+
+                /* 周波数レジスタ値算出 */
                 uint16_t tone = psg_calc_tone(ch->octave, note);
+
                 if (ch->detune != 0) {
                     /* デチューン分調整 */
                     if ((ch->detune & 0x80u) == 0) {
@@ -267,15 +307,34 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
                         tone += (ch->detune & ~0x80u);
                     }
                 }
+
+                /* 前ノートがタイでない場合は書き込み前にボリュームオフ */
+                if (!tie)
+                    psg_write(drv, AY_AVOL + ch->channel_index, 0);
+
+                /* 現在の基準トーン値セット */
                 ch->freq_value = tone;
 
+                /* 周波数レジスタセット */
                 psg_write(drv, AY_AFINE + ch->channel_index * 2,
                     (uint8_t)(tone & 0xFF));
                 psg_write(drv, AY_ACOARSE + ch->channel_index * 2,
                     (uint8_t)((tone >> 8) & 0x0F));
+                /* 音量レジスタセット */
                 psg_write(drv, AY_AVOL + ch->channel_index,
                         (uint8_t)(ch->volume & 0x0F));
+
+                /* ui 表示用ノートイベント更新 */
+                psg_note_event(drv, ch->channel_index,
+                               ch->octave, note, ch->volume, (uint16_t)len, 0,
+                               drv->main.bpm_x10);
             }
+
+            /* タイフラグ更新 */
+            if (tie)
+                ch->flags |= CH_F_TIE;
+            else
+                ch->flags &= ~CH_F_TIE;
 
             /* 音符を処理したので、この tick は終了 */
             return;
@@ -475,7 +534,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             if (ch->j_return_offset != 0) {
                 ch->data_offset = ch->j_return_offset;
                 ch->octave = (ch->octave_backup >> 4) & 0x0f;
-                return;
+                continue;
             } else {
                 ch->active = 0;
                 return;
