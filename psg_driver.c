@@ -192,7 +192,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
         return;
     }
 
-    uint8_t wait_counter = ch->wait_counter;
+    uint16_t wait_counter = ch->wait_counter;
     wait_counter--;
     ch->wait_counter = wait_counter;
 
