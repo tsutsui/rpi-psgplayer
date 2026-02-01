@@ -236,7 +236,7 @@ psg_driver_init(PSGDriver *drv,
     const uint8_t reg7_default = 0xf8;
     psg_write(drv, AY_ENABLE, reg7_default);
     drv->main.reg7_value = reg7_default;
-    const uint8_t reg6_default = 0xc0;
+    const uint8_t reg6_default = 0x00;
     psg_write(drv, AY_NOISEPER, reg6_default);
     drv->main.reg6_value = reg6_default;
 
