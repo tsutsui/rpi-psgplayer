@@ -180,6 +180,99 @@ psg_vibrato_tick(PSGDriver *drv, PSGChannel *ch)
     }
 }
 
+/* ソフトウェアエンベロープ処理 */
+
+/* ノート開始時のソフトウェアエンベロープ初期化 */
+static void
+psg_psgeg_note_init(PSGChannel *ch)
+{
+    /* EG2フラグクリア */
+    ch->flags &= ~CH_F_PSG_EG;
+    /* PSG-EGカウンタワーク 初期化 */
+    ch->eg_count_work = ch->eg_count_base;
+    /* PSG音量幅カウンタワーク 初期化 */
+    ch->eg_width_work = 0;
+}
+
+/* 発声中のソフトウェアエンベロープ処理 */
+static void
+psg_psgeg_tick(PSGDriver *drv, PSGChannel *ch)
+{
+    if (ch->eg_width_base != 0) {
+        /* ソフトウェアエンベロープ (EG) 有効時のみ処理 */
+        if ((ch->flags & CH_F_PSG_EG) == 0) {
+            /* EG 1段目処理 */
+            if (--ch->eg_count_work == 0) {
+                /* カウントに到達したら EG処理実行 */
+                if (ch->eg_width_work != ch->eg_width_base) {
+                    /* EG変化幅に到達していなければ EG 1段目処理 */
+                    /* カウンタ初期化 */
+                    ch->eg_count_work = ch->eg_count_base;
+                    /* EG変化量分加減算 */
+                    ch->eg_width_work += ch->eg_delta_base;
+                    /* 音量補正値更新 */
+                    ch->volume_adjust = ch->eg_width_work;
+                    /* EG補正後ボリューム値書き込み */
+                    int vol = ch->volume + ch->volume_adjust;
+                    /* vol += fade; */
+                    if (vol > 15)
+                        vol = 15;
+                    if (vol < 0)
+                        vol = 0;
+                    psg_write(drv, AY_AVOL + ch->channel_index,
+                              (uint8_t)vol);
+                } else {
+                    /* EG変化幅に到達したら EG2段目開始処理 */
+                    /* EG2 フラグセット */
+                    ch->flags |= CH_F_PSG_EG;
+                    /* 2nd音量幅ワーク初期化 */
+                    ch->eg_width_work = 0;
+                    /* 2ndカウンタワーク初期化 */
+                    ch->eg_count_work = ch->eg2_count_base & 0x7Fu;
+                    if (ch->eg2_width_base != 0) {
+                        /* 音量補正値更新 */
+                        ch->volume_adjust =
+                          ch->eg2_width_base + ch->eg_width_base;
+                        int vol = ch->volume + ch->volume_adjust;
+                        /* vol += fade; */
+                        if (vol > 15)
+                            vol = 15;
+                        if (vol < 0)
+                            vol = 0;
+                        psg_write(drv, AY_AVOL + ch->channel_index,
+                                  (uint8_t)vol);
+                    }
+                }
+            }
+        } else {
+            /* EG 2段目処理 */
+            if (ch->eg2_width_base != 0) {
+                if (--ch->eg_count_work == 0) {
+                    /* 2ndカウンタワーク初期化 */
+                    ch->eg_count_work = ch->eg2_count_base & 0x7Fu;
+                    /* 補正幅更新 */
+                    if (ch->eg_width_work < 15)
+                        ch->eg_width_work++;
+                    int delta = ch->eg_width_work;
+                    if ((ch->eg2_count_base & 0x80u) != 0)
+                        delta = -delta;
+                    /* 音量補正値更新 */
+                    ch->volume_adjust =
+                        delta + ch->eg_width_base + ch->eg2_width_base;
+                        int vol = ch->volume + ch->volume_adjust;
+                        /* vol += fade; */
+                        if (vol > 15)
+                            vol = 15;
+                        if (vol < 0)
+                            vol = 0;
+                        psg_write(drv, AY_AVOL + ch->channel_index,
+                                  (uint8_t)vol);
+                }
+            }
+        }
+    }
+}
+
 /* デモ画面表示用ノートデータ書き込み */
 static inline void
 psg_note_event(PSGDriver *drv, int ch, uint8_t octave, uint8_t note,
@@ -322,79 +415,8 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
         /* 発声中ビブラート (LFO) 処理 */
         psg_vibrato_tick(drv, ch);
 
-        if (ch->eg_width_base != 0) {
-            /* 発声中ソフトウェアエンベロープ (EG) 処理 */
-            if ((ch->flags & CH_F_PSG_EG) == 0) {
-                /* EG 1段目処理 */
-                if (--ch->eg_count_work == 0) {
-                    /* カウントに到達したら EG処理実行 */
-                    if (ch->eg_width_work != ch->eg_width_base) {
-                        /* EG変化幅に到達していなければ EG 1段目処理 */
-                        /* カウンタ初期化 */
-                        ch->eg_count_work = ch->eg_count_base;
-                        /* EG変化量分加減算 */
-                        ch->eg_width_work += ch->eg_delta_base;
-                        /* 音量補正値更新 */
-                        ch->volume_adjust = ch->eg_width_work;
-                        /* EG補正後ボリューム値書き込み */
-                        int vol = ch->volume + ch->volume_adjust;
-                        /* vol += fade; */
-                        if (vol > 15)
-                            vol = 15;
-                        if (vol < 0)
-                            vol = 0;
-                        psg_write(drv, AY_AVOL + ch->channel_index,
-                                  (uint8_t)vol);
-                    } else {
-                        /* EG変化幅に到達したら EG2段目開始処理 */
-                        /* EG2 フラグセット */
-                        ch->flags |= CH_F_PSG_EG;
-                        /* 2nd音量幅ワーク初期化 */
-                        ch->eg_width_work = 0;
-                        /* 2ndカウンタワーク初期化 */
-                        ch->eg_count_work = ch->eg2_count_base & 0x7Fu;
-                        if (ch->eg2_width_base != 0) {
-                            /* 音量補正値更新 */
-                            ch->volume_adjust =
-                              ch->eg2_width_base + ch->eg_width_base;
-                            int vol = ch->volume + ch->volume_adjust;
-                            /* vol += fade; */
-                            if (vol > 15)
-                                vol = 15;
-                            if (vol < 0)
-                                vol = 0;
-                            psg_write(drv, AY_AVOL + ch->channel_index,
-                                      (uint8_t)vol);
-                        }
-                    }
-                }
-            } else {
-                /* EG 2段目処理 */
-                if (ch->eg2_width_base != 0) {
-                    if (--ch->eg_count_work == 0) {
-                        /* 2ndカウンタワーク初期化 */
-                        ch->eg_count_work = ch->eg2_count_base & 0x7Fu;
-                        /* 補正幅更新 */
-                        if (ch->eg_width_work < 15)
-                            ch->eg_width_work++;
-                        int delta = ch->eg_width_work;
-                        if ((ch->eg2_count_base & 0x80u) != 0)
-                            delta = -delta;
-                        /* 音量補正値更新 */
-                        ch->volume_adjust =
-                            delta + ch->eg_width_base + ch->eg2_width_base;
-                            int vol = ch->volume + ch->volume_adjust;
-                            /* vol += fade; */
-                            if (vol > 15)
-                                vol = 15;
-                            if (vol < 0)
-                                vol = 0;
-                            psg_write(drv, AY_AVOL + ch->channel_index,
-                                      (uint8_t)vol);
-                    }
-                }
-            }
-        }
+        /* 発声中ソフトウェアエンベロープ (EG) 処理 */
+        psg_psgeg_tick(drv, ch);
 
         /* ノート継続なので終了 */
         return;
@@ -470,13 +492,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
                 int prev_tie = (ch->flags & CH_F_TIE) != 0;
                 if (!prev_tie && ch->eg_width_base != 0) {
                     /* ソフトウェアエンベロープ (EG) ワーク初期化 */
-
-                    /* EG2フラグクリア */
-                    ch->flags &= ~CH_F_PSG_EG;
-                    /* PSG-EGカウンタワーク 初期化 */
-                    ch->eg_count_work = ch->eg_count_base;
-                    /* PSG音量幅カウンタワーク 初期化 */
-                    ch->eg_width_work = 0;
+                    psg_psgeg_note_init(ch);
                 }
 
                 if ((ch->flags & CH_F_VIB_ON) != 0) {
