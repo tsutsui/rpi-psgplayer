@@ -344,7 +344,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
                         if (vol < 0)
                             vol = 0;
                         psg_write(drv, AY_AVOL + ch->channel_index,
-			          (uint8_t)vol);
+                                  (uint8_t)vol);
                     } else {
                         /* EG変化幅に到達したら EG2段目開始処理 */
                         /* EG2 フラグセット */
@@ -364,7 +364,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
                             if (vol < 0)
                                 vol = 0;
                             psg_write(drv, AY_AVOL + ch->channel_index,
-			              (uint8_t)vol);
+                                      (uint8_t)vol);
                         }
                     }
                 }
@@ -390,7 +390,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
                             if (vol < 0)
                                 vol = 0;
                             psg_write(drv, AY_AVOL + ch->channel_index,
-			              (uint8_t)vol);
+                                      (uint8_t)vol);
                     }
                 }
             }
