@@ -151,9 +151,9 @@ gpio_wait(void)
 
     volatile uint32_t dummy;
     for (unsigned int i = 0; i < NREAD; i++) {
-        dummy = gpio[GPCLR0];
+        dummy = gpio[GPCLR0 / 4];
         (void)dummy;
-        dummy = gpio[GPSET0];
+        dummy = gpio[GPSET0 / 4];
         (void)dummy;
     }
     mmio_barrier();
