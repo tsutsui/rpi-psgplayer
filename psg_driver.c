@@ -68,7 +68,7 @@ static inline void
 psg_write(PSGDriver *drv, uint8_t reg, uint8_t val)
 {
     if (drv->write_reg) {
-        (*drv->write_reg)(drv, reg, val);
+        (*drv->write_reg)(drv->opaque, reg, val);
     }
 }
 
@@ -279,7 +279,8 @@ psg_note_event(PSGDriver *drv, int ch, uint8_t octave, uint8_t note,
                uint8_t volume, uint16_t len, uint8_t is_rest, uint16_t bpm_x10)
 {
     if (drv->note_event) {
-        (*drv->note_event)(drv, ch, octave, note, volume, len, is_rest, bpm_x10);
+        (*drv->note_event)(drv->opaque,
+                           ch, octave, note, volume, len, is_rest, bpm_x10);
     }
 }
 
@@ -303,16 +304,14 @@ psg_channel_reset(PSGChannel *ch, int index)
 /* ドライバ初期化 */
 void
 psg_driver_init(PSGDriver *drv,
-                PSGWriteRegFn write_cb,
-                void *write_user,
-                PSGNoteEventFn note_cb,
-                void *note_user)
+                PSGWriteRegFn reg_write_cb,
+                PSGNoteEventFn ui_note_cb,
+                void *opaque)
 {
     memset(drv, 0, sizeof(*drv));
-    drv->write_reg  = write_cb;
-    drv->write_user = write_user;
-    drv->note_event = note_cb;
-    drv->note_user  = note_user;
+    drv->write_reg  = reg_write_cb;
+    drv->note_event = ui_note_cb;
+    drv->opaque     = opaque;
 
     drv->main.fade_value = 0;
     drv->main.fade_step = 0;
