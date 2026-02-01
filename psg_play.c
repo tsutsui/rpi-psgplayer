@@ -142,6 +142,23 @@ gpio_write_masks(uint32_t set_mask, uint32_t clr_mask)
     mmio_barrier();
 }
 
+/* Dummy GPIO register reads for wait by I/O */
+static inline void
+gpio_wait(void)
+{
+/* 2 seems enough even on AY-3-8910, but for safety */
+#define NREAD   3u
+
+    volatile uint32_t dummy;
+    for (unsigned int i = 0; i < NREAD; i++) {
+        dummy = gpio[GPCLR0];
+        (void)dummy;
+        dummy = gpio[GPSET0];
+        (void)dummy;
+    }
+    mmio_barrier();
+}
+
 /* Put value on data bus GPIO4..11 in one operation (2 stores: clear then set) */
 static inline void
 bus_write8(uint8_t v)
@@ -202,14 +219,9 @@ ym_latch_addr(uint8_t reg)
 {
     bus_write8(reg & 0x0f);
     ctrl_latch_addr();
-    /* XXX: Address setup time: 300 ns */
-    ctrl_latch_addr();
-    ctrl_latch_addr();
-    ctrl_latch_addr();
-    ctrl_latch_addr();
-    mmio_barrier();
+    /* Wait address setup time: 300 ns on YM2149F, 400 ns on AY-3-8910 */
+    gpio_wait();
     ctrl_inactive();
-    mmio_barrier();
 }
 
 static void
@@ -221,14 +233,9 @@ ym_write_data(uint8_t data)
     /* recommended: always start from inactive so only BDIR needs to be raised */
     mmio_barrier();
     ctrl_write_data();
-    /* XXX: Write signal time: 300 ns */
-    ctrl_write_data();
-    ctrl_write_data();
-    ctrl_write_data();
-    ctrl_write_data();
-    mmio_barrier();
+    /* Wait write signal time: 300 ns on YM2149F, 500 ns on AY-3-8910 */
+    gpio_wait();
     ctrl_inactive();
-    mmio_barrier();
 }
 
 static void
