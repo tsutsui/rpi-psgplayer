@@ -40,6 +40,11 @@ typedef struct {
     char prev[UI_ROWS][UI_COLS + 1];
     int  have_prev;
 
+    /* screen output buffer */
+#define UI_OUT_CAP 8192
+    char   out_buf[UI_OUT_CAP];
+    size_t out_len;
+
     struct termios tio_saved;
     int tio_saved_valid;
     int cursor_hidden;

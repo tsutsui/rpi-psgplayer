@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
 #include <unistd.h>
 #include <inttypes.h>
@@ -70,9 +71,6 @@ ui_term_apply(UI_state *ui)
     if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO))
         return;
 
-    /* stdout バッファ無効 */
-    setvbuf(stdout, NULL, _IONBF, 0);
-
     /* termios 保存 */
     if (tcgetattr(STDIN_FILENO, &ui->tio_saved) == 0) {
         ui->tio_saved_valid = 1;
@@ -131,6 +129,7 @@ ui_init(UI_state *ui, uint64_t now_ns)
 
     /* alternate screen + clear */
     fputs("\033[?1049h\033[H\033[J", stdout);
+    fflush(stdout);
 
     /* 曲タイトル UTF-8 表示用の utf8_fit_cols() で必要 */
     setlocale(LC_CTYPE, "");
@@ -393,6 +392,75 @@ piano_plot_col_noise(uint8_t reg6)
     return 3 + 8 + 12 + (31 - reg6);
 }
 
+/* UI画面出力バッファリング */
+static inline void
+ui_out_reset(UI_state *ui)
+{
+    ui->out_len = 0;
+}
+
+static inline void
+ui_out_flush(UI_state *ui)
+{
+    if (ui->out_len == 0)
+        return;
+    /* 描画テキストが揃ったところで1回のwrite(2)で画面更新 */
+    (void)write(STDOUT_FILENO, ui->out_buf, ui->out_len);
+    ui->out_len = 0;
+}
+
+static inline void
+ui_out_append(UI_state *ui, const char *s, size_t n)
+{
+    if (n > UI_OUT_CAP) {
+        /* 念の為で大量描画の場合は直書き出力 */
+        ui_out_flush(ui);
+        (void)write(STDOUT_FILENO, s, n);
+        return;
+    }
+
+    /* バッファが足りなければ途中 flush */
+    if (ui->out_len + n > UI_OUT_CAP) {
+        ui_out_flush(ui);
+    }
+    memcpy(ui->out_buf + ui->out_len, s, n);
+    ui->out_len += n;
+}
+
+static inline void
+ui_out_puts(UI_state *ui, const char *s)
+{
+    ui_out_append(ui, s, strlen(s));
+}
+
+static inline void
+ui_out_printf(UI_state *ui, const char *fmt, ...)
+{
+    char tmp[256];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(tmp, sizeof(tmp), fmt, ap);
+    va_end(ap);
+
+    if (n <= 0)
+        return;
+
+    if ((size_t)n < sizeof(tmp)) {
+        ui_out_append(ui, tmp, (size_t)n);
+        return;
+    }
+
+    /* 256 を超えるなら必要サイズで確保して append */
+    char *dyn = malloc((size_t)n + 1);
+    if (!dyn)
+        return;
+    va_start(ap, fmt);
+    vsnprintf(dyn, (size_t)n + 1, fmt, ap);
+    va_end(ap);
+    ui_out_append(ui, dyn, (size_t)n);
+    free(dyn);
+}
+
 /* ---- ここからが差し替え対象の ui_render() 本体 ---- */
 
 /*
@@ -570,13 +638,17 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
 
     if (ui->have_prev == 0) {
         /* full draw first time */
-        fputs("\033[H", stdout);
+        ui_out_puts(ui, "\033[H");
         for (int r = 0; r < UI_ROWS; r++) {
-            fputs(frame[r], stdout);
-            fputc('\n', stdout);
+            ui_out_append(ui, frame[r], UI_COLS);
+            ui_out_puts(ui, "\n");
         }
         /* clear rest */
-        fputs("\033[24;1H\033[J", stdout);
+        ui_out_puts(ui, "\033[24;1H\033[J");
+
+        /* flush to screen */
+        ui_out_flush(ui);
+
         /* save */
         for (int r = 0; r < UI_ROWS; r++)
             memcpy(ui->prev[r], frame[r], UI_COLS + 1);
@@ -587,14 +659,13 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
     for (int r = 0; r < UI_ROWS; r++) {
         if (memcmp(ui->prev[r], frame[r], UI_COLS) != 0) {
             /* move cursor to row r+1, col 1 */
-            char out[32 + UI_COLS + 4];
-            int len = snprintf(out, sizeof(out), "\033[%d;1H%.*s",
-              r + 1, UI_COLS, frame[r]);
-            if (len > 0)
-                (void)write(STDOUT_FILENO, out, (size_t)len);
+            ui_out_printf(ui, "\033[%d;1H", r + 1);
+            ui_out_append(ui, frame[r], UI_COLS);
             memcpy(ui->prev[r], frame[r], UI_COLS + 1);
         }
     }
+    ui_out_puts(ui, "\033[24;1H");
+    ui_out_flush(ui);
 }
 
 void
