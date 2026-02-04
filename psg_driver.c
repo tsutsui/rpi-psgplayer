@@ -1,4 +1,5 @@
 #include "psg_driver.h"
+#include "ym2149f.h"
 #include <string.h>
 #include <stdio.h>
 

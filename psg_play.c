@@ -1,25 +1,12 @@
 /*
  * psg_play.c
  *  Minimal YM2149 (AY-3-8910 compatible) player
- *  using GPIO via /dev/mem mmap(2) on Raspberry Pi 3B
- *
- * Wiring (BC2=H fixed, A8=H A9=L fixed):
- *   GPIO4..11 -> DA0..7 (LSB=GPIO4)
- *   GPIO12    -> BDIR
- *   GPIO13    -> BC1
- *   GPIO16    -> RESET (active-high)
- *
  */
 
-#include <sys/types.h>
-#include <sys/mman.h>
 #include <sys/select.h>
 
-#include <errno.h>
-#include <fcntl.h>
 #include <inttypes.h>
 #include <signal.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,55 +15,11 @@
 
 #include "psg_driver.h"
 #include "player_ui.h"
-
-#define PERI_BASE   0x3F000000u
-#define GPIO_BASE   (PERI_BASE + 0x200000u)
-#define GPIO_SIZE   0x1000u
-
-/* GPIO registers */
-#define GPFSEL0     0x00
-#define GPFSEL1     0x04
-#define GPFSEL2     0x08
-#define GPSET0      0x1c
-#define GPCLR0      0x28
-#define GPLEV0      0x34
-
-/* ---- GPIO pin assignment (Raspberry Pi GPIO numbering) ---- */
-enum {
-    PIN_D0   = 4,  /* DA0 */
-    PIN_D1   = 5,
-    PIN_D2   = 6,
-    PIN_D3   = 7,
-    PIN_D4   = 8,
-    PIN_D5   = 9,
-    PIN_D6   = 10,
-    PIN_D7   = 11, /* DA7 */
-
-    PIN_BDIR = 12,
-    PIN_BC1  = 13,
-
-    PIN_RESET = 16
-};
-
-/* Masks */
-#define MASK_DATABUS   (0xFFu << PIN_D0)              /* GPIO4..11 */
-#define MASK_BDIR      (1u << PIN_BDIR)
-#define MASK_BC1       (1u << PIN_BC1)
-#define MASK_CTRL      (MASK_BDIR | MASK_BC1)
-#define MASK_RESET     (1u << PIN_RESET)
+#include "psg_backend.h"
+#include "psg_backend_rpi_gpio.h"
 
 static volatile sig_atomic_t g_stop = 0;
 static volatile sig_atomic_t g_redraw = 0;
-
-struct rpi_gpio_ops {
-    int fd;
-    uint32_t *gpio;
-};
-
-static struct rpi_gpio_ops rpi_gpio = {
-    .fd = -1,
-    .gpio = NULL
-};
 
 static void
 on_signal(int signo)
@@ -92,210 +35,6 @@ die(const char *msg)
     exit(1);
 }
 
-static void
-sleep_us(long us)
-{
-    struct timespec ts;
-    ts.tv_sec = us / 1000000;
-    ts.tv_nsec = (us % 1000000) * 1000;
-    while (nanosleep(&ts, &ts) == -1 && errno == EINTR)
-        ;
-}
-
-/* Minimal memory barrier (ordering for MMIO) */
-static inline void
-mmio_barrier(void)
-{
-#if defined(__arm__) || defined(__aarch64__)
-    __asm__ volatile("dmb ish" ::: "memory");
-#else
-    __sync_synchronize();
-#endif
-}
-
-/* Set GPIO function to output: fsel=001 */
-static void
-gpio_config_output(struct rpi_gpio_ops *rgo, int pin)
-{
-    uint32_t reg = pin / 10;          /* each GPFSEL covers 10 pins */
-    uint32_t shift = (pin % 10) * 3;
-    volatile uint32_t *fsel = &rgo->gpio[GPFSEL0 / 4 + reg];
-
-    uint32_t v = *fsel;
-    v &= ~(7u << shift);
-    v |=  (1u << shift);
-    *fsel = v;
-    mmio_barrier();
-}
-
-static void
-gpio_config(struct rpi_gpio_ops *rgo)
-{
-    /* configure pins as output */
-    for (int pin = PIN_D0; pin <= PIN_D7; pin++) {
-        gpio_config_output(rgo, pin);
-    }
-    gpio_config_output(rgo, PIN_BDIR);
-    gpio_config_output(rgo, PIN_BC1);
-    gpio_config_output(rgo, PIN_RESET);
-}
-
-static int
-hw_init(void **hwp)
-{
-    const char *dev = "/dev/mem";
-    struct rpi_gpio_ops *rgo = &rpi_gpio;
-
-    int fd = open(dev, O_RDWR | O_SYNC);
-    if (fd == -1)
-        die("open(/dev/mem)");
-    rgo->fd = fd;
-
-    void *p = mmap(NULL, GPIO_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED,
-      fd, GPIO_BASE);
-    if (p == MAP_FAILED)
-        die("mmap(GPIO)");
-    rgo->gpio = p;
-
-    gpio_config(rgo);
-    *hwp = (void *)rgo;
-
-    return 1;
-}
-
-static int
-hw_fini(void *opaque)
-{
-    struct rpi_gpio_ops *rgo = opaque;
-
-    if (rgo == NULL)
-        return 0;
-
-    if (rgo->gpio != NULL)
-        munmap(rgo->gpio, GPIO_SIZE);
-    if (rgo->fd != -1)
-        close(rgo->fd);
-
-    return 1;
-}
-
-
-/* Write multiple pins at once: set_mask bits become 1, clr_mask bits become 0 */
-static inline void
-gpio_write_masks(void *hw, uint32_t set_mask, uint32_t clr_mask)
-{
-    struct rpi_gpio_ops *rgo = hw;
-    volatile uint32_t *gpio = rgo->gpio;
-    if (clr_mask)
-        gpio[GPCLR0 / 4] = clr_mask;
-    if (set_mask)
-        gpio[GPSET0 / 4] = set_mask;
-    mmio_barrier();
-}
-
-/* Dummy GPIO register reads for wait by I/O */
-static inline void
-gpio_wait(void *hw)
-{
-/* 2 seems enough even on AY-3-8910, but for safety */
-#define NREAD   3u
-    struct rpi_gpio_ops *rgo = hw;
-    volatile uint32_t *gpio = rgo->gpio;
-    volatile uint32_t dummy;
-
-    for (unsigned int i = 0; i < NREAD; i++) {
-        dummy = gpio[GPCLR0 / 4];
-        (void)dummy;
-        dummy = gpio[GPSET0 / 4];
-        (void)dummy;
-    }
-    mmio_barrier();
-}
-
-/* Put value on data bus GPIO4..11 in one operation (2 stores: clear then set) */
-static inline void
-bus_write8(void *hw, uint8_t v)
-{
-    uint32_t setm = ((uint32_t)v << PIN_D0) & MASK_DATABUS;
-    uint32_t clrm = MASK_DATABUS & ~setm;
-    gpio_write_masks(hw, setm, clrm);
-}
-
-/*
- * YM2149/AY-3-8910 bus control (BC2 fixed HIGH):
- *   BDIR BC1  Function
- *    0    0   Inactive
- *    0    1   Read  (unused here)
- *    1    0   Write (data)
- *    1    1   Latch address
- *
- * The key: for "latch address", we set both bits HIGH in one GPSET write
- * (no intermediate READ/WRITE state).
- */
-static inline void
-ctrl_inactive(void *hw)
-{
-    gpio_write_masks(hw, 0, MASK_CTRL);
-}
-
-static inline void
-ctrl_latch_addr(void *hw)
-{
-    /* set both in one shot (no intermediate state) */
-    gpio_write_masks(hw, MASK_CTRL, 0);
-}
-
-static inline void
-ctrl_write_data(void *hw)
-{
-    /*
-     * Ensure BC1=0 first; then set BDIR=1 (can be two stores but very tight).
-     * If we always go through inactive before write, we can do just "set BDIR".
-     */
-    gpio_write_masks(hw, MASK_BDIR, MASK_BC1);
-}
-
-static void
-ym_reset_pulse(void *hw)
-{
-    /* RESETはアクティブHigh想定 (I/F回路はオープンコレクタTr経由で駆動) */
-    gpio_write_masks(hw, 0, MASK_RESET);      /* deassert = 0 */
-    sleep_us(10);
-    gpio_write_masks(hw, MASK_RESET, 0);      /* assert = 1 */
-    sleep_us(1000);
-    gpio_write_masks(hw, 0, MASK_RESET);      /* deassert = 0*/
-    sleep_us(1000);
-}
-
-static void
-ym_latch_addr(void *hw, uint8_t reg)
-{
-    bus_write8(hw, reg & 0x0f);
-    ctrl_latch_addr(hw);
-    /* Wait address setup time: 300 ns on YM2149F, 400 ns on AY-3-8910 */
-    gpio_wait(hw);
-    ctrl_inactive(hw);
-}
-
-static void
-ym_write_data(void *hw, uint8_t data)
-{
-    bus_write8(hw, data);
-    ctrl_inactive(hw);
-    /* recommended: always start from inactive so only BDIR needs to be raised */
-    ctrl_write_data(hw);
-    /* Wait write signal time: 300 ns on YM2149F, 500 ns on AY-3-8910 */
-    gpio_wait(hw);
-    ctrl_inactive(hw);
-}
-
-static void
-ym_write_reg(void *hw, uint8_t reg, uint8_t val)
-{
-    ym_latch_addr(hw, reg);
-    ym_write_data(hw, val);
-}
-
 /* --- timing helpers --- */
 static inline uint64_t
 nsec_now_monotonic(void)
@@ -306,17 +45,8 @@ nsec_now_monotonic(void)
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
-/* One-time init to make sure the chip is in a known state. */
-static void
-psg_reset(void *hw)
-{
-    ctrl_inactive(hw);
-    bus_write8(hw, 0x00);
-    ym_reset_pulse(hw);
-}
-
 typedef struct psgio {
-    void *hw;
+    psg_backend_t *psgbe;
     UI_state *ui;
 } psgio_t;
 
@@ -324,9 +54,9 @@ static void
 psg_write_reg_cb(void *opaque, uint8_t reg, uint8_t val)
 {
     psgio_t *psgio = opaque;
-    void *hw = psgio->hw;
+    psg_backend_t *psgbe = psgio->psgbe;
     UI_state *ui = psgio->ui;
-    ym_write_reg(hw, reg, val);
+    (void)(*psgbe->ops->write_reg)(psgbe, reg, val);
     ui_on_reg_write(ui, reg, val);
 }
 
@@ -355,10 +85,14 @@ main(int argc, char **argv)
 {
     const char *ifname;
     const char *title = NULL;
-    void *hw = NULL;
     psgio_t psgiostore, *psgio;
+    psg_backend_ops_t ops_store, *ops;
+    psg_backend_t psgbe_store, *psgbe;
+    int backend_inited = 0;
+    int backend_enabled = 0;
     PSGDriver psgdriver, *drv;
     UI_state uistate, *ui;
+    int status = EXIT_SUCCESS;
 
     int ch;
     while ((ch = getopt(argc, argv, "t:")) != -1) {
@@ -419,11 +153,36 @@ main(int argc, char **argv)
         die("p6psgfile invalid data");
     }
 
+    /* ---- YM2149 backend bind/init/enable/reset ---- */
     psgio = &psgiostore;
-    (void)hw_init(&hw);
-    psgio->hw = hw;
 
-    psg_reset(hw);
+    ops = &ops_store;
+    memset(ops, 0, sizeof(*ops));
+    psg_backend_rpi_gpio_bind(ops);
+    if (ops->id == NULL) {
+        fprintf(stderr, "failed to bind backend\n");
+        status = EXIT_FAILURE;
+        goto out;
+    }
+
+    psgbe = &psgbe_store;
+    memset(psgbe, 0, sizeof(*psgbe));
+    psgbe->ops = ops;
+
+    if ((*psgbe->ops->init)(psgbe) == 0) {
+        fprintf(stderr, "failed to init backend: %s\n", psgbe->ops->id);
+        status = EXIT_FAILURE;
+        goto out;
+    }
+    psgio->psgbe = psgbe;
+    backend_inited = 1;
+
+    if ((*psgbe->ops->enable)(psgbe) == 0) {
+        fprintf(stderr, "failed to enable backend: %s\n", psgbe->ops->id);
+        status = EXIT_FAILURE;
+        goto out;
+    }
+    backend_enabled = 1;
 
     ui = &uistate;
     int ui_active = 0;
@@ -508,13 +267,21 @@ main(int argc, char **argv)
     }
 
     psg_driver_stop(drv);
-    psg_reset(hw);
 
     if (ui_active)
         ui_shutdown(ui);
 
-    (void)hw_fini(hw);
+ out:
+    if (backend_enabled) {
+        (*psgbe->ops->disable)(psgbe);
+        backend_enabled = 0;
+    }
+
+    if (backend_inited) {
+        (*psgbe->ops->fini)(psgbe);
+        backend_inited = 0;
+    }
 
     free(psgdata);
-    return 0;
+    exit(status);
 }
