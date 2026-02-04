@@ -1,0 +1,4 @@
+*.bin
+*.mml
+*.o
+psg_play
