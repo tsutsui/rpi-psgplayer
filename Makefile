@@ -10,3 +10,7 @@ ${PROG}:	${OBJS}
 
 clean:
 	rm -f ${PROG} *.o *.core
+
+psg_play.o:	psg_driver.h player_ui.h
+psg_driver.o:	player_ui.h
+psg_player.o:	player_ui.h
