@@ -17,6 +17,7 @@
 #include <termios.h>
 
 #include "player_ui.h"
+#include "ym2149f.h"
 
 /* ---- 固定テンプレ（79桁×23行） ---- */
 
@@ -429,11 +430,13 @@ fmt_hex2h_fixed(char dst3[4], uint8_t v)
 
 /* ボリュームバー表示を返すヘルパ */
 static void
-fmt_vol_bar_fixed(char *dst, int width, uint8_t vol /*0..15*/)
+fmt_vol_bar_fixed(char *dst, int width, uint8_t vol, uint8_t reg)
 {
-    int filled = (int)((vol * (uint8_t)width + 14) / 15);
+    int vfilled = (int)((vol * (uint8_t)width + 14) / 15);
+    int rfilled = (int)((reg * (uint8_t)width + 14) / 15);
+    /* MML上のVOLを - 、休符やソフトウェアエンベロープ含む実音量を # で表示 */
     for (int i = 0; i < width; i++)
-        dst[i] = (i < filled) ? '#' : '.';
+        dst[i] = (i < rfilled) ? '#' : (i < vfilled) ? '-' : '.';
     dst[width] = '\0';
 }
 
@@ -652,7 +655,8 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
         /* Volume BAR */
         {
             char bar_fixed[UI_W_BAR + 1];
-            fmt_vol_bar_fixed(bar_fixed, UI_W_BAR, ui->mus[ch].volume & 0x0f);
+            fmt_vol_bar_fixed(bar_fixed, UI_W_BAR,
+              ui->mus[ch].volume & 0x0f, ui->reg[AY_AVOL + ch] & 0x0f);
             ui_put_fixed_if_changed(ui, row, COL_BAR, UI_W_BAR, bar_fixed,
               ui->cache_bar[ch]);
         }
