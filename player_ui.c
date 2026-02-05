@@ -130,39 +130,6 @@ ui_update_mixer(UI_state *ui)
     ui->noise_enable[2] = ((m & 0x20) == 0);
 }
 
-/* called from register write path */
-void
-ui_on_reg_write(UI_state *ui, uint8_t reg, uint8_t val)
-{
-    reg &= 0x0f;
-    ui->reg[reg] = val;
-
-    if (reg == 6) {
-        ui->noise_period = ui->reg[6] & 0x1f;
-    } else if (reg == 7) {
-        ui_update_mixer(ui);
-    }
-}
-
-/* called from driver when a note/rest is committed */
-void
-ui_on_note_event(UI_state *ui, uint64_t now_ns, int ch,
-    uint8_t octave, uint8_t note, uint8_t volume,
-    uint16_t len, uint8_t is_rest, uint16_t bpm_x10)
-{
-    if (ch < 0 || ch >= 3)
-        return;
-    UI_music_ch *m = &ui->mus[ch];
-    m->t_ns   = now_ns;
-    m->octave = octave;
-    m->note   = note;
-    m->volume = volume & 0x0f;
-    m->len    = len;
-    m->is_rest = is_rest ? 1 : 0;
-
-    ui->bpm_x10 = bpm_x10;
-}
-
 static void
 ui_term_apply(UI_state *ui)
 {
@@ -211,44 +178,6 @@ ui_term_restore(UI_state *ui)
         (void)tcsetattr(STDIN_FILENO, TCSANOW, &ui->tio_saved);
         ui->tio_saved_valid = 0;
     }
-}
-
-/* ANSI UI init/shutdown */
-void
-ui_init(UI_state *ui, uint64_t now_ns)
-{
-    memset(ui, 0, sizeof(*ui));
-    ui->ui_period_ns = 50ull * 1000ull * 1000ull; /* 50ms */
-    ui->start_ns     = now_ns;
-    ui->next_ui_ns   = now_ns + ui->ui_period_ns;
-    ui->have_prev    = 0;
-
-    ui_term_apply(ui);
-
-    /* alternate screen + clear */
-    fputs("\033[?1049h\033[H\033[J", stdout);
-    fflush(stdout);
-
-    /* 曲タイトル UTF-8 表示用の utf8_fit_cols() で必要 */
-    setlocale(LC_CTYPE, "");
-
-    ui->initialized = 1;
-}
-
-void
-ui_shutdown(UI_state *ui)
-{
-    if (ui == NULL || ui->initialized == 0)
-        return;
-
-    ui_term_restore(ui);
-
-    /* move cursor (in case of no alternate screen) */
-    fputs("\033[24;1H", stdout);
-
-    /* leave alternate screen */
-    fputs("\033[?1049l", stdout);
-    ui->initialized = 0;
 }
 
 /* ---- ヘルパ：安全な put ---- */
@@ -661,6 +590,78 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
     }
     ui_out_puts(ui, "\033[24;1H");
     ui_out_flush(ui);
+}
+
+/* called from register write path */
+void
+ui_on_reg_write(UI_state *ui, uint8_t reg, uint8_t val)
+{
+    reg &= 0x0f;
+    ui->reg[reg] = val;
+
+    if (reg == 6) {
+        ui->noise_period = ui->reg[6] & 0x1f;
+    } else if (reg == 7) {
+        ui_update_mixer(ui);
+    }
+}
+
+/* called from driver when a note/rest is committed */
+void
+ui_on_note_event(UI_state *ui, uint64_t now_ns, int ch,
+    uint8_t octave, uint8_t note, uint8_t volume,
+    uint16_t len, uint8_t is_rest, uint16_t bpm_x10)
+{
+    if (ch < 0 || ch >= 3)
+        return;
+    UI_music_ch *m = &ui->mus[ch];
+    m->t_ns   = now_ns;
+    m->octave = octave;
+    m->note   = note;
+    m->volume = volume & 0x0f;
+    m->len    = len;
+    m->is_rest = is_rest ? 1 : 0;
+
+    ui->bpm_x10 = bpm_x10;
+}
+
+/* ANSI UI init/shutdown/render entry points */
+
+void
+ui_init(UI_state *ui, uint64_t now_ns)
+{
+    memset(ui, 0, sizeof(*ui));
+    ui->ui_period_ns = 50ull * 1000ull * 1000ull; /* 50ms */
+    ui->start_ns     = now_ns;
+    ui->next_ui_ns   = now_ns + ui->ui_period_ns;
+    ui->have_prev    = 0;
+
+    ui_term_apply(ui);
+
+    /* alternate screen + clear */
+    fputs("\033[?1049h\033[H\033[J", stdout);
+    fflush(stdout);
+
+    /* 曲タイトル UTF-8 表示用の utf8_fit_cols() で必要 */
+    setlocale(LC_CTYPE, "");
+
+    ui->initialized = 1;
+}
+
+void
+ui_shutdown(UI_state *ui)
+{
+    if (ui == NULL || ui->initialized == 0)
+        return;
+
+    ui_term_restore(ui);
+
+    /* move cursor (in case of no alternate screen) */
+    fputs("\033[24;1H", stdout);
+
+    /* leave alternate screen */
+    fputs("\033[?1049l", stdout);
+    ui->initialized = 0;
 }
 
 void
