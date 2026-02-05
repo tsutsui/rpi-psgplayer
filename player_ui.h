@@ -10,7 +10,7 @@
 
 typedef struct {
     uint64_t t_ns;     /* when this note/rest was issued */
-    uint8_t octave;    /* as-is from driver (O0..O8 etc.) */
+    uint8_t octave;    /* as-is from driver (O1..O8 etc.) */
     uint8_t note;      /* 0=rest, 1..12 */
     uint8_t volume;    /* 0..15 */
     uint16_t len;      /* ticks/units as you set wait_counter */

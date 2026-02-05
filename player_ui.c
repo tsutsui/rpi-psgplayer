@@ -1,7 +1,6 @@
 /*
  * player_ui.c
- *  For PSG Player demonstration on Raspberry Pi 3B at Open Source Conference 
- *  using GPIO via /dev/mem mmap(2) on Raspberry Pi 3B
+ *  For PSG Player demonstration on Raspberry Pi 3B at Open Source Conference
  */
 
 #include <stdio.h>
@@ -299,8 +298,6 @@ psg_period_to_hz(uint16_t period, double clock_hz)
 }
 
 /* ---- UTF-8 title fit (display width) ---- */
-/* You can reuse your earlier utf8_fit_cols(); included here minimal version. */
-
 static void
 utf8_fit_cols(char *dst, size_t dstsz, const char *src, int max_cols)
 {
@@ -461,12 +458,10 @@ ui_out_printf(UI_state *ui, const char *fmt, ...)
     free(dyn);
 }
 
-/* ---- ここからが差し替え対象の ui_render() 本体 ---- */
-
 /*
  * Required UI_state fields (already in your earlier UI_state):
  * - mus[3] : contains octave/note/volume/len/is_rest/t_ns
- * - r[16]  : register shadow updated in ui_on_reg_write()
+ * - reg[16]  : register shadow updated in ui_on_reg_write()
  * - tone_enable[3], noise_enable[3] : from mixer (r7)
  * - noise_period
  * - w ring etc (you can keep it; this template UI doesn't show last-writes)
