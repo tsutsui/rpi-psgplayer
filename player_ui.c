@@ -48,6 +48,75 @@ static const char *ui_tmpl[UI_ROWS] = {
   "+-----------------------------------------------------------------------------+"  /* 23 */
 };
 
+/* UI画面出力バッファリング */
+static inline void
+ui_out_reset(UI_state *ui)
+{
+    ui->out_len = 0;
+}
+
+static inline void
+ui_out_flush(UI_state *ui)
+{
+    if (ui->out_len == 0)
+        return;
+    /* 描画テキストが揃ったところで1回のwrite(2)で画面更新 */
+    (void)write(STDOUT_FILENO, ui->out_buf, ui->out_len);
+    ui->out_len = 0;
+}
+
+static inline void
+ui_out_append(UI_state *ui, const char *s, size_t n)
+{
+    if (n > UI_OUT_CAP) {
+        /* 念の為で大量描画の場合は直書き出力 */
+        ui_out_flush(ui);
+        (void)write(STDOUT_FILENO, s, n);
+        return;
+    }
+
+    /* バッファが足りなければ途中 flush */
+    if (ui->out_len + n > UI_OUT_CAP) {
+        ui_out_flush(ui);
+    }
+    memcpy(ui->out_buf + ui->out_len, s, n);
+    ui->out_len += n;
+}
+
+static inline void
+ui_out_puts(UI_state *ui, const char *s)
+{
+    ui_out_append(ui, s, strlen(s));
+}
+
+static inline void
+ui_out_printf(UI_state *ui, const char *fmt, ...)
+{
+    char tmp[256];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(tmp, sizeof(tmp), fmt, ap);
+    va_end(ap);
+
+    if (n <= 0)
+        return;
+
+    if ((size_t)n < sizeof(tmp)) {
+        ui_out_append(ui, tmp, (size_t)n);
+        return;
+    }
+
+    /* 256 を超えるなら必要サイズで確保して append */
+    char *dyn = malloc((size_t)n + 1);
+    if (!dyn)
+        return;
+    va_start(ap, fmt);
+    vsnprintf(dyn, (size_t)n + 1, fmt, ap);
+    va_end(ap);
+    ui_out_append(ui, dyn, (size_t)n);
+    free(dyn);
+}
+
 static void
 ui_update_mixer(UI_state *ui)
 {
@@ -387,75 +456,6 @@ piano_plot_col_noise(uint8_t reg6)
      * O3C の位置はそこから +8 +12 なので +20 する
      */
     return 3 + 8 + 12 + (31 - reg6);
-}
-
-/* UI画面出力バッファリング */
-static inline void
-ui_out_reset(UI_state *ui)
-{
-    ui->out_len = 0;
-}
-
-static inline void
-ui_out_flush(UI_state *ui)
-{
-    if (ui->out_len == 0)
-        return;
-    /* 描画テキストが揃ったところで1回のwrite(2)で画面更新 */
-    (void)write(STDOUT_FILENO, ui->out_buf, ui->out_len);
-    ui->out_len = 0;
-}
-
-static inline void
-ui_out_append(UI_state *ui, const char *s, size_t n)
-{
-    if (n > UI_OUT_CAP) {
-        /* 念の為で大量描画の場合は直書き出力 */
-        ui_out_flush(ui);
-        (void)write(STDOUT_FILENO, s, n);
-        return;
-    }
-
-    /* バッファが足りなければ途中 flush */
-    if (ui->out_len + n > UI_OUT_CAP) {
-        ui_out_flush(ui);
-    }
-    memcpy(ui->out_buf + ui->out_len, s, n);
-    ui->out_len += n;
-}
-
-static inline void
-ui_out_puts(UI_state *ui, const char *s)
-{
-    ui_out_append(ui, s, strlen(s));
-}
-
-static inline void
-ui_out_printf(UI_state *ui, const char *fmt, ...)
-{
-    char tmp[256];
-    va_list ap;
-    va_start(ap, fmt);
-    int n = vsnprintf(tmp, sizeof(tmp), fmt, ap);
-    va_end(ap);
-
-    if (n <= 0)
-        return;
-
-    if ((size_t)n < sizeof(tmp)) {
-        ui_out_append(ui, tmp, (size_t)n);
-        return;
-    }
-
-    /* 256 を超えるなら必要サイズで確保して append */
-    char *dyn = malloc((size_t)n + 1);
-    if (!dyn)
-        return;
-    va_start(ap, fmt);
-    vsnprintf(dyn, (size_t)n + 1, fmt, ap);
-    va_end(ap);
-    ui_out_append(ui, dyn, (size_t)n);
-    free(dyn);
 }
 
 /*
