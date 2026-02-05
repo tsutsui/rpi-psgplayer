@@ -19,6 +19,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -219,11 +220,14 @@ rpi_gpio_init(psg_backend_t *psgbe)
         return 0;
 
     rpi_gpio_t *rg = calloc(1, sizeof(*rg));
-    if (rg == NULL)
+    if (rg == NULL) {
+        perror("malloc(ctx)");
         return 0;
+    }
 
     rg->fd = open("/dev/mem", O_RDWR | O_SYNC);
     if (rg->fd == -1) {
+        perror("open(/dev/mem)");
         free(rg);
         return 0;
     }
@@ -231,6 +235,7 @@ rpi_gpio_init(psg_backend_t *psgbe)
     void *p = mmap(NULL, GPIO_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED,
                    rg->fd, GPIO_BASE);
     if (p == MAP_FAILED) {
+        perror("mmap(GPIO)");
         close(rg->fd);
         free(rg);
         return 0;
