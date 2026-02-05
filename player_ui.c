@@ -180,78 +180,6 @@ ui_term_restore(UI_state *ui)
     }
 }
 
-/* ---- ヘルパ：安全な put ---- */
-
-static void
-line_copy_from_template(char dst[UI_COLS + 1], const char *src)
-{
-    /* テンプレはASCII前提で strlen==UI_COLS を要求 */
-    size_t n = strlen(src);
-    assert(n == UI_COLS);
-    memcpy(dst, src, UI_COLS + 1); /* includes '\0' */
-}
-
-/* 0-based column; writes bytes as-is (ASCII想定のフィールドで使う) */
-static void
-put_bytes(char line[UI_COLS + 1], int col, const char *s)
-{
-    if (col < 0 || col >= UI_COLS)
-        return;
-    for (int i = 0; s[i] != '\0' && (col + i) < UI_COLS; i++) {
-        line[col + i] = s[i];
-    }
-}
-
-/* fill field with spaces */
-static void
-put_spaces(char line[UI_COLS + 1], int col, int width)
-{
-    if (width <= 0)
-        return;
-    if (col < 0)
-        return;
-    for (int i = 0; i < width && (col + i) < UI_COLS; i++)
-        line[col + i] = ' ';
-}
-
-/* 2-hex + 'h' (e.g., "7Fh") */
-static void
-put_hex2h(char line[UI_COLS + 1], int col, uint8_t v)
-{
-    char b[4];
-    snprintf(b, sizeof(b), "%02Xh", (unsigned)v);
-    put_bytes(line, col, b);
-}
-
-/* fixed-width right-aligned integer in ASCII */
-static void
-put_u32_r(char line[UI_COLS + 1], int col, int width, uint32_t v)
-{
-    char b[32];
-    snprintf(b, sizeof(b), "%*u", width, (unsigned)v);
-    put_bytes(line, col, b);
-}
-
-/* fixed-width right-aligned float in ASCII */
-static void
-put_f1_r(char line[UI_COLS + 1], int col, int width, double x)
-{
-    char b[32];
-    snprintf(b, sizeof(b), "%*.*f", width, 1, x);
-    put_bytes(line, col, b);
-}
-
-/* VOL bar: width=15 in template */
-static void
-put_vol_bar(char line[UI_COLS + 1], int col, int width, uint8_t vol /*0..15*/)
-{
-    if (width <= 0)
-        return;
-    int filled = (int)((vol * (uint8_t)width + 14) / 15);
-    for (int i = 0; i < width && (col + i) < UI_COLS; i++)
-        line[col + i] = (i < filled) ? '#' : '.';
-}
-
 /* NOTE string from mus (ASCII only) */
 static const char *
 note_name_12(int note_1_12)
@@ -264,7 +192,7 @@ note_name_12(int note_1_12)
 }
 
 static void
-make_note_ascii(char out[4], uint8_t octave, uint8_t note, uint8_t is_rest)
+make_note_ascii(char out[UI_W_NOTE + 1], uint8_t octave, uint8_t note, uint8_t is_rest)
 {
     if (is_rest || note == 0) {
         /* "--" in your CH line example */
@@ -313,7 +241,8 @@ utf8_fit_cols(char *dst, size_t dstsz, const char *src, int max_cols)
             memset(&st, 0, sizeof(st));
             if (cols + 1 > max_cols)
                 break;
-            if (out + 1 < dstsz) dst[out++] = '?';
+            if (out + 1 < dstsz)
+                dst[out++] = '?';
             cols += 1;
             p += 1;
             continue;
@@ -349,7 +278,7 @@ utf8_fit_cols(char *dst, size_t dstsz, const char *src, int max_cols)
 }
 
 /* ---- ピアノロール（79桁内）へのプロット ---- */
-/* このテンプレのピアノ行は "|A|.....|" なので、プロット領域は col=3..(UI_COLS-2) */
+/* ピアノロール行は "|A|.....|" なので、プロット領域は col=3..(UI_COLS-2) */
 
 static int
 piano_plot_col(uint8_t octave, uint8_t note /*1..12*/)
@@ -387,6 +316,210 @@ piano_plot_col_noise(uint8_t reg6)
     return 3 + 8 + 12 + (31 - reg6);
 }
 
+/* 状態表示更新処理 */
+
+/* 更新表示必要なパラメータの行と桁定義 (0-origin) */
+enum {
+    /* タイトル行: タイトル、テンポ、経過時間 */
+    ROW_TITLE = 4,
+
+    COL_TITLE = 15,
+    COL_TEMPO = 60,
+    COL_TSEC  = 69,
+
+    /* チャンネル A/B/C 行: ノート、周波数、ボリューム、トーン/ノイズ */
+    ROW_CH_A = 6,
+    ROW_CH_B = 7,
+    ROW_CH_C = 8,
+
+    COL_NOTE  = 13,
+    COL_HZ    = 17,
+    COL_VOLN  = 31,
+    COL_BAR   = 35,
+    COL_TONE  = 58,
+    COL_NOISE = 69,
+
+    /* ピアノロール表示行 */
+    ROW_PIANO_A = 14,
+    ROW_PIANO_B = 15,
+    ROW_PIANO_C = 16,
+
+    /* レジスタ値表示行 */
+    ROW_R0 = 18,
+    ROW_R2 = 19,
+    ROW_R4 = 20,
+    ROW_R6 = 21,
+
+    COL_R0 = 22, COL_R1 = 51, COL_R8 = 74,
+    COL_R2 = 22, COL_R3 = 51, COL_R9 = 74,
+    COL_R4 = 22, COL_R5 = 51, COL_RA = 74,
+    COL_R6 = 22, COL_R7 = 51
+};
+
+/* チャンネル別チャンネル状態表示行 */
+static inline int
+row_ch(int ch)
+{
+    return (ch == 0) ? ROW_CH_A : (ch == 1) ? ROW_CH_B : ROW_CH_C;
+}
+
+/* チャンネル別ピアノロール表示行 */
+static inline int
+row_piano(int ch)
+{
+    return (ch == 0) ? ROW_PIANO_A : (ch == 1) ? ROW_PIANO_B : ROW_PIANO_C;
+}
+
+/* 渡された width バイトが変化ありなら (row,col) 位置から表示出力ヘルパ */
+static void
+ui_put_fixed_if_changed(UI_state *ui,
+    int row0, int col0, int width,
+    const char *cur_fixed, char *cache_fixed)
+{
+    /* 変化なければ更新不要 */
+    if (memcmp(cache_fixed, cur_fixed, (size_t)width) == 0)
+        return;
+
+    /* CUP is 1-based */
+    ui_out_printf(ui, "\033[%d;%dH", row0 + 1, col0 + 1);
+    ui_out_append(ui, cur_fixed, (size_t)width);
+
+    memcpy(cache_fixed, cur_fixed, (size_t)width);
+    cache_fixed[width] = '\0';
+}
+
+/* 固定幅文字列を返すフォーマットヘルパ */
+static void
+fmt_pad(char *dst, int width, const char *src)
+{
+    int n = (int)strlen(src);
+    if (n > width)
+        n = width;
+    memcpy(dst, src, (size_t)n);
+    for (int i = n; i < width; i++)
+        dst[i] = ' ';
+    dst[width] = '\0';
+}
+
+/* 引数のdoubleに対応する固定幅小数点文字列を返すフォーマットヘルパ */
+static void
+fmt_f1_fixed(char *dst, int width, double x)
+{
+    char tmp[64];
+    /* right aligned, 1 decimal */
+    snprintf(tmp, sizeof(tmp), "%*.*f", width, 1, x);
+    fmt_pad(dst, width, tmp);
+}
+
+/* 引数のintに対応する固定幅整数文字列を返すフォーマットヘルパ */
+static void
+fmt_u_fixed(char *dst, int width, unsigned int v)
+{
+    char tmp[64];
+    snprintf(tmp, sizeof(tmp), "%*u", width, v);
+    fmt_pad(dst, width, tmp);
+}
+
+/* 引数のuint8_tに対応する固定幅16進2桁を返すフォーマットヘルパ */
+static void
+fmt_hex2h_fixed(char dst3[4], uint8_t v)
+{
+    snprintf(dst3, 4, "%02Xh", v);
+}
+
+/* ボリュームバー表示を返すヘルパ */
+static void
+fmt_vol_bar_fixed(char *dst, int width, uint8_t vol /*0..15*/)
+{
+    int filled = (int)((vol * (uint8_t)width + 14) / 15);
+    for (int i = 0; i < width; i++)
+        dst[i] = (i < filled) ? '#' : '.';
+    dst[width] = '\0';
+}
+
+/* 初回の画面テンプレート表示 */
+static void
+ui_draw_template_once(UI_state *ui)
+{
+    ui_out_reset(ui);
+    ui_out_puts(ui, "\033[H");
+    for (int r = 0; r < UI_ROWS; r++) {
+        size_t n = strlen(ui_tmpl[r]);
+        assert(n == UI_COLS);
+        ui_out_append(ui, ui_tmpl[r], UI_COLS);
+        ui_out_puts(ui, "\n");
+    }
+    ui_out_puts(ui, "\033[24;1H\033[J");
+    ui_out_flush(ui);
+    ui->template_drawn = 1;
+}
+
+/* ピアノロールマーカー表示更新 */
+static void
+ui_update_piano_marker(UI_state *ui, int ch, int want_mark, int x_new,
+  char mark_char)
+{
+    int row = row_piano(ch);
+
+    int x_old = ui->cache_piano_x[ch];
+    char m_old = ui->cache_piano_mark[ch];
+
+    /* 前回表示ありの場合、今回発声無しもしくは変化ありなら '.' に戻す */
+    if (x_old >= 0) {
+        if (!want_mark || x_new != x_old || mark_char != m_old) {
+            ui_out_printf(ui, "\033[%d;%dH", row + 1, x_old + 1);
+            ui_out_append(ui, ".", 1);
+            ui->cache_piano_x[ch] = -1;
+            ui->cache_piano_mark[ch] = '\0';
+        }
+    }
+
+    if (want_mark) {
+        /* 今回発声ありかつ変化ありなら表示更新 */
+        if (x_old != x_new || m_old != mark_char) {
+            ui_out_printf(ui, "\033[%d;%dH", row + 1, x_new + 1);
+            ui_out_append(ui, &mark_char, 1);
+            ui->cache_piano_x[ch] = x_new;
+            ui->cache_piano_mark[ch] = mark_char;
+        }
+    }
+}
+
+/* レジスタ値表示更新 */
+static void
+put_reg_if_changed(UI_state *ui, int row0, int col0, int regno)
+{
+    /* 変化なければ更新不要 */
+    if (ui->cache_reg[regno] == ui->reg[regno])
+        return;
+    char buf[4];
+    fmt_hex2h_fixed(buf, ui->reg[regno]);
+    ui_out_printf(ui, "\033[%d;%dH", row0 + 1, col0 + 1);
+    ui_out_append(ui, buf, 3);
+    ui->cache_reg[regno] = ui->reg[regno];
+}
+
+/* 描画キャッシュデータクリア */
+static void
+ui_cache_clear(UI_state *ui)
+{
+    ui->template_drawn = 0;
+    for (int ch = 0; ch < 3; ch++) {
+        ui->cache_note[ch][0]  = '\0';
+        ui->cache_hz[ch][0]    = '\0';
+        ui->cache_voln[ch][0]  = '\0';
+        ui->cache_bar[ch][0]   = '\0';
+        ui->cache_tone[ch][0]  = '\0';
+        ui->cache_noise[ch][0] = '\0';
+        ui->cache_piano_x[ch]  = -1;
+        ui->cache_piano_mark[ch] = '\0';
+    }
+    ui->cache_title[0] = '\0';
+    ui->cache_bpm[0]   = '\0';
+    ui->cache_tsec[0]  = '\0';
+    ui->cache_reg_valid = 0;
+}
+
 /*
  * Required UI_state fields (already in your earlier UI_state):
  * - mus[3] : contains octave/note/volume/len/is_rest/t_ns
@@ -394,200 +527,196 @@ piano_plot_col_noise(uint8_t reg6)
  * - tone_enable[3], noise_enable[3] : from mixer (r7)
  * - noise_period
  * - w ring etc (you can keep it; this template UI doesn't show last-writes)
- *
- * Also add:
- * - prev[UI_ROWS][UI_COLS+1], have_prev
  */
 
 static void
 ui_render(UI_state *ui, uint64_t now_ns, const char *title)
 {
-    /* 1) build frame from templates */
-    char frame[UI_ROWS][UI_COLS + 1];
-    for (int r = 0; r < UI_ROWS; r++)
-        line_copy_from_template(frame[r], ui_tmpl[r]);
+    ui_out_reset(ui);
 
-    /* 2) dynamic fields coordinates (0-based col) */
-
-    /* Music Title line: row 4 in tmpl (0-based), underline field begins after "Music Title: " */
-    const int ROW_TITLE = 4;
-    const int COL_TITLE = 15;      /* after "| Music Title: " */
-    const int W_TITLE   = 38;      /* number of '_' in template */
-
-    /* bpm=xxx and t=xxxxx.xs */
-    const int COL_TEMPO = 60;      /* points to first digit in "TEMPO=120.0" */
-    const int W_TEMPO   = 5;       /* "120.0" */
-    const int COL_TSEC  = 69;      /* points to first digit in "t=12345.6s" */
-    const int W_TSEC    = 7;       /* "12345.6" */
-
-    /* Channel rows */
-    const int ROW_CH[3] = { 6, 7, 8 };
-
-    /* NOTE field: after "NOTE=" in each channel line.
-       In template: "| Ch A: NOTE=E4  329.6Hz ..."
-                  ^ col 0 is '|'
-       We will overwrite from NOTE start to keep consistent.
-     */
-    const int COL_NOTE  = 13;      /* points to 'E' in "E4" */
-    const int W_NOTE    = 3;       /* allow "C#4" */
-    const int COL_HZ    = 17;      /* points to first digit in " 329.6" */
-    const int W_HZ      = 6;       /* " 329.6" */
-    const int COL_VOLN  = 31;      /* points to first digit in "10" (VOL=10) */
-    const int W_VOLN    = 2;
-    const int COL_BAR   = 35;      /* inside [...............] start */
-    const int W_BAR     = 15;
-    const int COL_TONE  = 58;      /* points to 'O' in "ON"/"OFF" */
-    const int COL_NOISE = 69;      /* points to 'O' in "OFF" */
-
-    /* Piano marker rows: A,B,C */
-    const int ROW_PIANO[3] = { 14, 15, 16 };
-
-    /* Register hex fields in bottom area */
-    const int ROW_R0 = 18, ROW_R2 = 19, ROW_R4 = 20, ROW_R6 = 21;
-    /* columns of "xxh" in those lines (counted to match template) */
-    const int COL_R0 = 22, COL_R1 = 51, COL_R8 = 74;
-    const int COL_R2 = 22, COL_R3 = 51, COL_R9 = 74;
-    const int COL_R4 = 22, COL_R5 = 51, COL_RA = 74;
-    const int COL_R6 = 22, COL_R7 = 51;
-
-    /* 3) Fill title (UTF-8) */
-    {
-        char fitted[W_TITLE * 4 + 1];
-        utf8_fit_cols(fitted, sizeof(fitted), (title ? title : "(no title)"), W_TITLE);
-
-        /* replace underscores area */
-        put_bytes(frame[ROW_TITLE], COL_TITLE, fitted);
+    if (ui->redraw) {
+        ui_cache_clear(ui);
+        ui->redraw = 0;
     }
 
-    /* 4) bpm and time */
+    if (!ui->template_drawn)
+        ui_draw_template_once(ui);
+
+    /* 1) Fill title (UTF-8, column-fitted, diff update) */
     {
-        /* bpm is calculated in driver from tempo */
+        char fitted[UI_W_TITLE * 4 + 1];
+
+        /*
+         * タイトルは日本語文字列表示も想定して UTF-8 にも対応するので
+         * 表示幅数と文字列バイト数とは一致しない。
+         * ただ、差分更新表示仕様では表示用の固定幅バッファは使用せず
+         * 「表示内容に変化があったら指定行の指定桁からタイトル文字列を出力」
+         * という操作なので、表示幅ではなく表示するUTF-8文字列バイト全体を
+         * キャッシュして比較する。
+         * ここで utf8_fit_cols() はコードポイント単位で文字幅を判定するので
+         * 絵文字・ZWJ・国旗などの合成グリフなどは端末上の表示幅と一致しない
+         * ケースがあるが、そこまでの厳密な UTF-8対応はせずに
+         * 「日本語が出せる」「途中で切っても文字化けしない」
+         * という仕様まで。
+         */
+        utf8_fit_cols(fitted, sizeof(fitted),
+            (title ? title : "(no title)"), UI_W_TITLE);
+
+        size_t cur_len = strlen(fitted);
+        size_t old_len = strlen(ui->cache_title);
+
+        if (cur_len != old_len ||
+          memcmp(ui->cache_title, fitted, cur_len) != 0) {
+            ui_out_printf(ui, "\033[%d;%dH", ROW_TITLE + 1, COL_TITLE + 1);
+            ui_out_append(ui, fitted, cur_len);
+
+            /* 表示幅分のUTF-8文字列バイト数でキャッシュ */
+            if (cur_len >= sizeof(ui->cache_title))
+                cur_len = sizeof(ui->cache_title) - 1;
+            memcpy(ui->cache_title, fitted, cur_len);
+            ui->cache_title[cur_len] = '\0';
+        }
+    }
+
+    /* 2) bpm and time */
+    {
+        char bpm_fixed[UI_W_BPM + 1];
         double bpm = ui->bpm_x10 / 10.0;
-        /* overwrite digits only */
-        put_f1_r(frame[ROW_TITLE], COL_TEMPO, W_TEMPO, bpm);
+        fmt_f1_fixed(bpm_fixed, UI_W_BPM, bpm);
+        ui_put_fixed_if_changed(ui, ROW_TITLE, COL_TEMPO, UI_W_BPM, bpm_fixed,
+          ui->cache_bpm);
 
+        char tsec_fixed[UI_W_TSEC + 1];
         double tsec = (double)(now_ns - ui->start_ns) / 1e9;
-        /* overwrite digits only; keep "t=" and "s" fixed */
-        put_f1_r(frame[ROW_TITLE], COL_TSEC, W_TSEC, tsec);
+        fmt_f1_fixed(tsec_fixed, UI_W_TSEC, tsec);
+        ui_put_fixed_if_changed(ui, ROW_TITLE, COL_TSEC, UI_W_TSEC, tsec_fixed,
+          ui->cache_tsec);
     }
 
-    /* 5) channel lines: NOTE/Hz/VOL/bar/TONE/NOISE */
-    const double clock_hz = 2000000.0; /* match your banner */
+    /* 3) channel lines (NOTE/Hz/VOL/bar/TONE/NOISE) and piano markers */
+    const double clock_hz = 2000000.0;
     for (int ch = 0; ch < 3; ch++) {
-        int row = ROW_CH[ch];
+        int row = row_ch(ch);
 
         /* 「トーン無しノイズのみ」の判定用 */
         int noise_only =
           (ui->tone_enable[ch] == 0) && (ui->noise_enable[ch] != 0);
 
         /* NOTE */
-        char nbuf[4];
-        make_note_ascii(nbuf, ui->mus[ch].octave, ui->mus[ch].note, ui->mus[ch].is_rest);
-        if (noise_only && (ui->mus[ch].volume != 0)) {
-            /* ノイズのみの時はMMLのノートは意味がないので別表示にする */
-            strcpy(nbuf, "NOI");
+        {
+            char note_tmp[UI_W_NOTE + 1];
+            make_note_ascii(note_tmp, ui->mus[ch].octave, ui->mus[ch].note,
+              ui->mus[ch].is_rest);
+            if (noise_only && (ui->mus[ch].volume != 0)) {
+                /* ノイズのみの時はMMLのノートは意味がないので別表示にする */
+                strcpy(note_tmp, "NOI");
+            }
+            char note_fixed[UI_W_NOTE + 1];
+            fmt_pad(note_fixed, UI_W_NOTE, note_tmp);
+            ui_put_fixed_if_changed(ui, row, COL_NOTE, UI_W_NOTE, note_fixed,
+              ui->cache_note[ch]);
         }
-        put_spaces(frame[row], COL_NOTE, W_NOTE);
-        put_bytes(frame[row], COL_NOTE, nbuf);
 
         /* Hz from register shadow (period) */
-        uint16_t period = 0;
-        period = (uint16_t)ui->reg[ch * 2 + 0] |
-                  ((uint16_t)(ui->reg[ch * 2 + 1] & 0x0f) << 8);
+        {
+            uint16_t period =
+                (uint16_t)ui->reg[ch * 2 + 0] |
+                ((uint16_t)(ui->reg[ch * 2 + 1] & 0x0f) << 8);
 
-        if (ui->mus[ch].is_rest ||
-            ui->mus[ch].note == 0 ||
-            ui->mus[ch].volume == 0 ||
-            period == 0 ||
-            noise_only) {
-            put_bytes(frame[row], COL_HZ, " -----");
-        } else {
-            double hz = psg_period_to_hz(period, clock_hz);
-            /* clamp for display sanity */
-            if (hz > 9999.9)
-                hz = 9999.9;
-            put_f1_r(frame[row], COL_HZ, W_HZ, hz);
+            char hz_fixed[UI_W_HZ + 1];
+            if (ui->mus[ch].is_rest ||
+                ui->mus[ch].note == 0 ||
+                ui->mus[ch].volume == 0 ||
+                period == 0 ||
+                noise_only) {
+                fmt_pad(hz_fixed, UI_W_HZ, " -----");
+            } else {
+                double hz = psg_period_to_hz(period, clock_hz);
+                /* clamp for display sanity */
+                if (hz > 9999.9)
+                    hz = 9999.9;
+                fmt_f1_fixed(hz_fixed, UI_W_HZ, hz);
+            }
+            ui_put_fixed_if_changed(ui, row, COL_HZ, UI_W_HZ, hz_fixed,
+              ui->cache_hz[ch]);
         }
 
-        /* VOL */
-        put_u32_r(frame[row], COL_VOLN, W_VOLN, (uint32_t)(ui->mus[ch].volume & 0x0f));
-        /* BAR */
-        put_vol_bar(frame[row], COL_BAR, W_BAR, (uint8_t)(ui->mus[ch].volume & 0x0f));
-
-        /* TONE/NOISE flags */
-        put_bytes(frame[row], COL_TONE,  ui->tone_enable[ch]  ? "ON " : "OFF");
-        put_bytes(frame[row], COL_NOISE, ui->noise_enable[ch] ? "ON " : "OFF");
-    }
-
-    /* 6) piano markers: clear lines are from template (dots), then plot one char per channel */
-    for (int ch = 0; ch < 3; ch++) {
-        int row = ROW_PIANO[ch];
-        /* place marker only when audible-ish */
-        if (ui->mus[ch].is_rest ||
-          ui->mus[ch].note == 0 ||
-          ui->mus[ch].volume == 0)
-            continue;
-
-        int noise_only =
-          (ui->tone_enable[ch] == 0) && (ui->noise_enable[ch] != 0);
-
-        int x = piano_plot_col(ui->mus[ch].octave, ui->mus[ch].note);
-        if (noise_only) {
-            x = piano_plot_col_noise(ui->reg[6]);
+        /* VOL number */
+        {
+            char vol_fixed[UI_W_VOLN + 1];
+            fmt_u_fixed(vol_fixed, UI_W_VOLN, ui->mus[ch].volume & 0x0f);
+            ui_put_fixed_if_changed(ui, row, COL_VOLN, UI_W_VOLN, vol_fixed,
+              ui->cache_voln[ch]);
         }
-        if (x < 0)
-            continue;
 
-        char mark = noise_only ? 'N' : (ch == 0) ? 'A' : (ch == 1) ? 'B' : 'C';
-        frame[row][x] = mark;
-    }
-
-    /* 7) registers display (xxh fields) */
-    put_hex2h(frame[ROW_R0], COL_R0, ui->reg[0]);
-    put_hex2h(frame[ROW_R0], COL_R1, ui->reg[1]);
-    put_hex2h(frame[ROW_R0], COL_R8, ui->reg[8]);
-
-    put_hex2h(frame[ROW_R2], COL_R2, ui->reg[2]);
-    put_hex2h(frame[ROW_R2], COL_R3, ui->reg[3]);
-    put_hex2h(frame[ROW_R2], COL_R9, ui->reg[9]);
-
-    put_hex2h(frame[ROW_R4], COL_R4, ui->reg[4]);
-    put_hex2h(frame[ROW_R4], COL_R5, ui->reg[5]);
-    put_hex2h(frame[ROW_R4], COL_RA, ui->reg[10]);
-
-    put_hex2h(frame[ROW_R6], COL_R6, ui->reg[6]);
-    put_hex2h(frame[ROW_R6], COL_R7, ui->reg[7]);
-
-    /* 8) draw: line-diff to reduce flicker */
-
-    if (ui->have_prev == 0) {
-        /* full draw first time */
-        ui_out_puts(ui, "\033[H");
-        for (int r = 0; r < UI_ROWS; r++) {
-            ui_out_append(ui, frame[r], UI_COLS);
-            ui_out_puts(ui, "\n");
+        /* Volume BAR */
+        {
+            char bar_fixed[UI_W_BAR + 1];
+            fmt_vol_bar_fixed(bar_fixed, UI_W_BAR, ui->mus[ch].volume & 0x0f);
+            ui_put_fixed_if_changed(ui, row, COL_BAR, UI_W_BAR, bar_fixed,
+              ui->cache_bar[ch]);
         }
-        /* clear rest */
-        ui_out_puts(ui, "\033[24;1H\033[J");
 
-        /* flush to screen */
-        ui_out_flush(ui);
+        /* TONE / NOISE fixed ("ON " or "OFF") */
+        {
+            const char *tone_s  = ui->tone_enable[ch]  ? "ON " : "OFF";
+            const char *noise_s = ui->noise_enable[ch] ? "ON " : "OFF";
+            ui_put_fixed_if_changed(ui, row, COL_TONE,  3, tone_s,
+              ui->cache_tone[ch]);
+            ui_put_fixed_if_changed(ui, row, COL_NOISE, 3, noise_s,
+              ui->cache_noise[ch]);
+        }
 
-        /* save */
-        for (int r = 0; r < UI_ROWS; r++)
-            memcpy(ui->prev[r], frame[r], UI_COLS + 1);
-        ui->have_prev = 1;
-        return;
-    }
+        /* piano marker: only if audible-ish, else clear */
+        {
+            int audible = ui->mus[ch].is_rest == 0 &&
+                          ui->mus[ch].note != 0 &&
+                          ui->mus[ch].volume != 0;
+            int want = audible;
 
-    for (int r = 0; r < UI_ROWS; r++) {
-        if (memcmp(ui->prev[r], frame[r], UI_COLS) != 0) {
-            /* move cursor to row r+1, col 1 */
-            ui_out_printf(ui, "\033[%d;1H", r + 1);
-            ui_out_append(ui, frame[r], UI_COLS);
-            memcpy(ui->prev[r], frame[r], UI_COLS + 1);
+            int x = -1;
+            if (want) {
+                if (noise_only) {
+                    x = piano_plot_col_noise(ui->reg[6]);
+                } else {
+                    x = piano_plot_col(ui->mus[ch].octave, ui->mus[ch].note);
+                }
+                if (x < 0)
+                    want = 0;
+            }
+            char mark =
+              noise_only ? 'N' : (ch == 0) ? 'A' : (ch == 1) ? 'B' : 'C';
+            ui_update_piano_marker(ui, ch, want, x, mark);
         }
     }
+
+    /* 4) registers display (xxh fields) */
+    {
+        if (!ui->cache_reg_valid) {
+            memcpy(ui->cache_reg, ui->reg, sizeof(ui->cache_reg));
+            ui->cache_reg_valid = 1;
+            /* force a write on first render after init */
+            for (int i = 0; i < 16; i++)
+                ui->cache_reg[i] ^= 0xFF;
+        }
+
+        put_reg_if_changed(ui, ROW_R0, COL_R0, 0);
+        put_reg_if_changed(ui, ROW_R0, COL_R1, 1);
+        put_reg_if_changed(ui, ROW_R0, COL_R8, 8);
+
+        put_reg_if_changed(ui, ROW_R2, COL_R2, 2);
+        put_reg_if_changed(ui, ROW_R2, COL_R3, 3);
+        put_reg_if_changed(ui, ROW_R2, COL_R9, 9);
+
+        put_reg_if_changed(ui, ROW_R4, COL_R4, 4);
+        put_reg_if_changed(ui, ROW_R4, COL_R5, 5);
+        put_reg_if_changed(ui, ROW_R4, COL_RA, 10);
+
+        put_reg_if_changed(ui, ROW_R6, COL_R6, 6);
+        put_reg_if_changed(ui, ROW_R6, COL_R7, 7);
+    }
+
+    /* park cursor + flush once */
     ui_out_puts(ui, "\033[24;1H");
     ui_out_flush(ui);
 }
@@ -634,7 +763,9 @@ ui_init(UI_state *ui, uint64_t now_ns)
     ui->ui_period_ns = 50ull * 1000ull * 1000ull; /* 50ms */
     ui->start_ns     = now_ns;
     ui->next_ui_ns   = now_ns + ui->ui_period_ns;
-    ui->have_prev    = 0;
+
+    /* caches: mark as invalid */
+    ui_cache_clear(ui);
 
     ui_term_apply(ui);
 
@@ -644,6 +775,9 @@ ui_init(UI_state *ui, uint64_t now_ns)
 
     /* 曲タイトル UTF-8 表示用の utf8_fit_cols() で必要 */
     setlocale(LC_CTYPE, "");
+
+    /* draw template now (once) */
+    ui_draw_template_once(ui);
 
     ui->initialized = 1;
 }
@@ -671,4 +805,13 @@ ui_maybe_render(UI_state *ui, uint64_t now_ns, const char *title)
         return;
     ui_render(ui, now_ns, title);
     ui->next_ui_ns = now_ns + ui->ui_period_ns;
+}
+
+void
+ui_request_redraw(UI_state *ui)
+{
+    if (ui == NULL)
+        return;
+
+    ui->redraw = 1;
 }

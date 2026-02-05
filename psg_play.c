@@ -207,8 +207,6 @@ main(int argc, char **argv)
     uint64_t t0 = nsec_now_monotonic();
     uint64_t next_deadline = t0 + tick_ns;
 
-    fprintf(stderr, "Start 2ms tick loop\n");
-
     while (g_stop == 0) {
         fd_set rfds;
         FD_ZERO(&rfds);
@@ -260,7 +258,7 @@ main(int argc, char **argv)
 
         /* draw AFTER catch-up loop (important) */
         if (g_redraw) {
-            ui->have_prev = 0;
+            ui_request_redraw(ui);;
             g_redraw = 0;
         }
         ui_maybe_render(ui, now, title != NULL ? title : "OSC demo");
