@@ -764,7 +764,7 @@ void
 ui_init(UI_state *ui, uint64_t now_ns)
 {
     memset(ui, 0, sizeof(*ui));
-    ui->ui_period_ns = 50ull * 1000ull * 1000ull; /* 50ms */
+    ui->ui_period_ns = 33333333ull; /* 33.3ms (30 fps) */
     ui->start_ns     = now_ns;
     ui->next_ui_ns   = now_ns + ui->ui_period_ns;
 
