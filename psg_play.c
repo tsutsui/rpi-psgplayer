@@ -142,7 +142,8 @@ main(int argc, char **argv)
     psgbe->ops = ops;
 
     if ((*psgbe->ops->init)(psgbe) == 0) {
-        fprintf(stderr, "failed to init backend: %s\n", psgbe->ops->id);
+        fprintf(stderr, "failed to init backend (%s): %s\n",
+            psgbe->ops->id, psg_backend_last_error(psgbe));
         status = EXIT_FAILURE;
         goto out;
     }
@@ -150,7 +151,8 @@ main(int argc, char **argv)
     backend_inited = 1;
 
     if ((*psgbe->ops->enable)(psgbe) == 0) {
-        fprintf(stderr, "failed to enable backend: %s\n", psgbe->ops->id);
+        fprintf(stderr, "failed to enable backend (%s): %s\n",
+            psgbe->ops->id, psg_backend_last_error(psgbe));
         status = EXIT_FAILURE;
         goto out;
     }

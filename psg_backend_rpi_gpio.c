@@ -96,7 +96,7 @@ detect_peri_base(void)
 
     /* Check Raspberry Pi model strings */
     if (sysctlbyname("hw.model", model, &len, NULL, 0) != 0) {
-        perror("sysctl hw.model");
+        /* TODO: peri_base 判定ではなく、汎用の機種判定にすべき */
         /* assume Pi2/3 as default */
         return PERI_BASE_BCM2836;
     }
@@ -264,15 +264,20 @@ rpi_gpio_init(psg_backend_t *psgbe)
     if (psgbe == NULL)
         return 0;
 
+    /* エラーメッセージ初期化 */
+    psgbe->last_error[0] = '\0';
+
     rpi_gpio_t *rg = calloc(1, sizeof(*rg));
     if (rg == NULL) {
-        perror("malloc(ctx)");
+        snprintf(psgbe->last_error, PSG_BACKEND_LAST_ERROR_MAXLEN,
+            "calloc(ctx): out of memory");
         return 0;
     }
 
     rg->fd = open("/dev/mem", O_RDWR | O_SYNC);
     if (rg->fd == -1) {
-        perror("open(/dev/mem)");
+        snprintf(psgbe->last_error, PSG_BACKEND_LAST_ERROR_MAXLEN,
+            "open(/dev/mem): %s", strerror(errno));
         free(rg);
         return 0;
     }
@@ -282,7 +287,9 @@ rpi_gpio_init(psg_backend_t *psgbe)
     void *p = mmap(NULL, GPIO_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED,
                    rg->fd, rg->peri_base + GPIO_OFFSET);
     if (p == MAP_FAILED) {
-        perror("mmap(GPIO)");
+        snprintf(psgbe->last_error, PSG_BACKEND_LAST_ERROR_MAXLEN,
+            "mmap(GPIO @0x%08x): %s",
+            (unsigned int)(rg->peri_base + GPIO_OFFSET), strerror(errno));
         close(rg->fd);
         free(rg);
         return 0;
@@ -324,8 +331,14 @@ rpi_gpio_fini(psg_backend_t *psgbe)
 static int
 rpi_gpio_enable(psg_backend_t *psgbe)
 {
-    if (psgbe == NULL || psgbe->ctx == NULL)
+    if (psgbe == NULL)
         return 0;
+
+    if (psgbe->ctx == NULL) {
+        snprintf(psgbe->last_error, PSG_BACKEND_LAST_ERROR_MAXLEN,
+            "enable: ctx is NULL (not initialized?)");
+        return 0;
+    }
 
     rpi_gpio_t *rg = psgbe->ctx;
 
@@ -357,12 +370,21 @@ rpi_gpio_disable(psg_backend_t *psgbe)
 static int
 rpi_gpio_reset(psg_backend_t *psgbe)
 {
-    if (psgbe == NULL || psgbe->ctx == NULL)
+    if (psgbe == NULL)
         return 0;
 
-    rpi_gpio_t *rg = psgbe->ctx;
-    if (rg->enabled == 0)
+    if (psgbe->ctx == NULL) {
+        snprintf(psgbe->last_error, PSG_BACKEND_LAST_ERROR_MAXLEN,
+            "reset: ctx is NULL (not initialized?)");
         return 0;
+    }
+
+    rpi_gpio_t *rg = psgbe->ctx;
+    if (rg->enabled == 0) {
+        snprintf(psgbe->last_error, PSG_BACKEND_LAST_ERROR_MAXLEN,
+            "reset: backend is disabled");
+        return 0;
+    }
 
     ctrl_inactive(rg);
     bus_write8(rg, 0x00);
@@ -374,12 +396,21 @@ rpi_gpio_reset(psg_backend_t *psgbe)
 static int
 rpi_gpio_write_reg(psg_backend_t *psgbe, uint8_t reg, uint8_t val)
 {
-    if (psgbe == NULL || psgbe->ctx == NULL)
+    if (psgbe == NULL)
         return 0;
 
-    rpi_gpio_t *rg = psgbe->ctx;
-    if (rg->enabled == 0)
+    if (psgbe->ctx == NULL) {
+        snprintf(psgbe->last_error, PSG_BACKEND_LAST_ERROR_MAXLEN,
+            "write_reg: ctx is NULL (not initialized?)");
         return 0;
+    }
+
+    rpi_gpio_t *rg = psgbe->ctx;
+    if (rg->enabled == 0) {
+        snprintf(psgbe->last_error, PSG_BACKEND_LAST_ERROR_MAXLEN,
+            "write_reg: backend is disabled");
+        return 0;
+    }
 
     ym_write_reg_raw(rg, reg, val);
     return 1;
