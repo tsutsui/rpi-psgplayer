@@ -3,13 +3,13 @@
  *  PC-6001 PSGドライバ用演奏データ読み出し
  */
 
-#include "p6psg.h"
-
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "p6psg.h"
 
 #define P6PSG_LAST_ERROR_MAXLEN 256
 

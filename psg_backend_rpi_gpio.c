@@ -13,9 +13,6 @@
  *     GPIO16    -> RESET (active-high)
  */
 
-#include "psg_backend_rpi_gpio.h"
-#include "ym2149f.h"
-
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/sysctl.h>
@@ -26,6 +23,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "psg_backend_rpi_gpio.h"
+#include "ym2149f.h"
 
 /* ---- BCM2835 (Raspberry Pi Zero/1) fixed addresses ---- */
 #define PERI_BASE_BCM2835   0x20000000u

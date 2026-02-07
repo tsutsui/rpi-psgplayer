@@ -3,10 +3,11 @@
  *  PC-6001 PSG音源ドライバ互換 コンパイル済み演奏データインタープリタ処理
  */
 
-#include "psg_driver.h"
-#include "ym2149f.h"
 #include <string.h>
 #include <stdio.h>
+
+#include "psg_driver.h"
+#include "ym2149f.h"
 
 /* 12音階テーブル */
 static const uint16_t psg_tone_table_oct0[13] = {
