@@ -1,3 +1,8 @@
+/*
+ * psg_driver.c
+ *  PC-6001 PSG音源ドライバ互換 コンパイル済み演奏データインタープリタ処理
+ */
+
 #include "psg_driver.h"
 #include "ym2149f.h"
 #include <string.h>

@@ -1,3 +1,8 @@
+/*
+ * psg_driver.h
+ *  PC-6001 PSG音源ドライバ互換 コンパイル済み演奏データ処理関連定義
+ */
+
 #ifndef PSG_DRIVER_H
 #define PSG_DRIVER_H
 
