@@ -2,7 +2,9 @@
  * psg_backend_rpi_gpio.c
  *
  * This backend assumes:
- * - Raspberry Pi 3B (BCM2837): PERI_BASE = 0x3F000000
+ * - Raspberry Pi 1/Zero (BCM2835): PERI_BASE = 0x20000000
+ * - Raspberry Pi 2/3 (BCM2836/7):  PERI_BASE = 0x3F000000
+ * - Raspberry Pi 4 (BCM2711):      PERI_BASE = 0xFE000000
  * - /dev/mem mmap GPIO
  * - Wiring (BC2=H fixed, A8=H A9=L fixed):
  *     GPIO4..11 -> DA0..7 (LSB=GPIO4)
@@ -16,6 +18,7 @@
 
 #include <sys/types.h>
 #include <sys/mman.h>
+#include <sys/sysctl.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -24,9 +27,16 @@
 #include <string.h>
 #include <unistd.h>
 
-/* ---- BCM2837 (Raspberry Pi 2/3) fixed addresses ---- */
-#define PERI_BASE   0x3F000000u
-#define GPIO_BASE   (PERI_BASE + 0x200000u)
+/* ---- BCM2835 (Raspberry Pi Zero/1) fixed addresses ---- */
+#define PERI_BASE_BCM2835   0x20000000u
+
+/* ---- BCM2836/7 (Raspberry Pi 2/3) fixed addresses ---- */
+#define PERI_BASE_BCM2836   0x3F000000u
+
+/* ---- BCM2711 (Raspberry Pi 4) fixed addresses ---- */
+#define PERI_BASE_BCM2711   0xFE000000u
+
+#define GPIO_OFFSET 0x00200000u
 #define GPIO_SIZE   0x1000u
 
 /* GPIO registers */
@@ -51,7 +61,7 @@ enum {
     PIN_RESET = 16
 };
 
-#define MASK_DATABUS   (0xFFu << PIN_D0)     /* GPIO4..11 */
+#define MASK_DATABUS   (0xFFu << PIN_D0)     /* DA0..DA7 */
 #define MASK_BDIR      (1u << PIN_BDIR)
 #define MASK_BC1       (1u << PIN_BC1)
 #define MASK_CTRL      (MASK_BDIR | MASK_BC1)
@@ -62,6 +72,7 @@ enum {
 
 typedef struct {
     int fd;
+    uint32_t peri_base;
     volatile uint32_t *gpio;
     int enabled;
 } rpi_gpio_t;
@@ -70,11 +81,45 @@ typedef struct {
 static inline void
 mmio_barrier(void)
 {
-#if defined(__arm__) || defined(__aarch64__)
+#if (defined(__arm__) && __ARM_ARCH >= 7) || defined(__aarch64__)
     __asm__ volatile("dmb ish" ::: "memory");
 #else
     __sync_synchronize();
 #endif
+}
+
+static uint32_t
+detect_peri_base(void)
+{
+    char model[256];
+    size_t len = sizeof(model);
+
+    /* Check Raspberry Pi model strings */
+    if (sysctlbyname("hw.model", model, &len, NULL, 0) != 0) {
+        perror("sysctl hw.model");
+        /* assume Pi2/3 as default */
+        return PERI_BASE_BCM2836;
+    }
+    model[len - 1] = '\0';
+
+    /* model strings are taken from dts files */
+    if (strstr(model, "raspberrypi,model-a") != NULL ||
+        strstr(model, "raspberrypi,model-b") != NULL ||
+        strstr(model, "raspberrypi,model-zero") != NULL) {
+        return PERI_BASE_BCM2835;
+    }
+    if (strstr(model, "raspberrypi,2-model") != NULL ||
+        strstr(model, "raspberrypi,3-model") != NULL ||
+        strstr(model, "raspberrypi,3-compute") != NULL) {
+        return PERI_BASE_BCM2836;
+    }
+    if (strstr(model, "raspberrypi,4-model") != NULL ||
+        strstr(model, "raspberrypi,400") != NULL) {
+        return PERI_BASE_BCM2711;
+    }
+
+    /* default Pi2/3 */
+    return PERI_BASE_BCM2836;
 }
 
 /* Set GPIO function to output: fsel=001 */
@@ -232,8 +277,10 @@ rpi_gpio_init(psg_backend_t *psgbe)
         return 0;
     }
 
+    rg->peri_base = detect_peri_base();
+
     void *p = mmap(NULL, GPIO_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED,
-                   rg->fd, GPIO_BASE);
+                   rg->fd, rg->peri_base + GPIO_OFFSET);
     if (p == MAP_FAILED) {
         perror("mmap(GPIO)");
         close(rg->fd);
