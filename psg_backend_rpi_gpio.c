@@ -5,12 +5,20 @@
  * - Raspberry Pi 1/Zero (BCM2835): PERI_BASE = 0x20000000
  * - Raspberry Pi 2/3 (BCM2836/7):  PERI_BASE = 0x3F000000
  * - Raspberry Pi 4 (BCM2711):      PERI_BASE = 0xFE000000
- * - /dev/mem mmap GPIO
+ * - /dev/mem mmap GPIO and CM
  * - Wiring (BC2=H fixed, A8=H A9=L fixed):
- *     GPIO4..11 -> DA0..7 (LSB=GPIO4)
- *     GPIO12    -> BDIR
- *     GPIO13    -> BC1
- *     GPIO16    -> RESET (active-high)
+ *     GPIO20..27 -> DA0..7 (LSB=GPIO20)
+ *     GPIO12     -> BDIR
+ *     GPIO13     -> BC1
+ *     GPIO17     -> RESET (active-high)
+ *     GPIO4      -> 2.000 MHz or 1.9968 MHz clock for YM2149F
+ *
+ * - Note BOARD_V1 (exhibit at OSC 2026 Osaka) had:
+ *     GPIO4..12 -> DA0..7 (LSB=GPIO4)
+ *     GPIO12     -> BDIR
+ *     GPIO13     -> BC1
+ *     GPIO16     -> RESET (active-high)
+ *     No GPIO clock (using 2.000 MHz oscillator)
  */
 
 #include <sys/types.h>
@@ -46,19 +54,62 @@
 #define GPSET0      0x1c
 #define GPCLR0      0x28
 
+/* Clock Manager (CM) registers */
+#define CM_OFFSET   0x00101000u
+#define CM_SIZE     0x1000u
+
+#define CM_GP0CTL   0x70
+#define CM_GP0DIV   0x74
+
+#define CM_PASSWD   0x5a000000u
+
+#define CM_CTL_MASH_SHIFT  9
+#define CM_CTL_MASH_MASK   (3u << CM_CTL_MASH_SHIFT)
+#define CM_CTL_FLIP        (1u << 8u)
+#define CM_CTL_BUSY        (1u << 7u)
+#define CM_CTL_KILL        (1u << 5u)
+#define CM_CTL_ENAB        (1u << 4u)
+#define CM_CTL_SRC_MASK    0x0fu
+
+/* clock source values */
+#define CM_SRC_OSC         1u
+#define CM_SRC_PLLD        6u   /* PLLD (assume 500MHz) */
+
+/* GPIO FSEL to enable Clock Manager */
+#define GPIO_FSEL_INPUT  0u
+#define GPIO_FSEL_OUTPUT 1u
+#define GPIO_FSEL_ALT0   4u  /* 100 */
+#define GPIO_FSEL_ALT5   2u  /* 010 */
+
 /* ---- Fixed pin assignment (BCM GPIO numbering) ---- */
 enum {
-    PIN_D0    = 4,  /* DA0 */
-    PIN_D1    = 5,
-    PIN_D2    = 6,
-    PIN_D3    = 7,
-    PIN_D4    = 8,
-    PIN_D5    = 9,
+#ifdef BOARD_V1
+    PIN_D0    =  4,  /* DA0 */
+    PIN_D1    =  5,
+    PIN_D2    =  6,
+    PIN_D3    =  7,
+    PIN_D4    =  8,
+    PIN_D5    =  9,
     PIN_D6    = 10,
     PIN_D7    = 11, /* DA7 */
     PIN_BDIR  = 12,
     PIN_BC1   = 13,
-    PIN_RESET = 16
+    PIN_RESET = 16,
+    PIN_CLOCK = 20  /* optional */
+#else
+    PIN_D0    = 20,  /* DA0 */
+    PIN_D1    = 21,
+    PIN_D2    = 22,
+    PIN_D3    = 23,
+    PIN_D4    = 24,
+    PIN_D5    = 25,
+    PIN_D6    = 26,
+    PIN_D7    = 27, /* DA7 */
+    PIN_BDIR  = 12,
+    PIN_BC1   = 13,
+    PIN_RESET = 17,
+    PIN_CLOCK =  4
+#endif
 };
 
 #define MASK_DATABUS   (0xFFu << PIN_D0)     /* DA0..DA7 */
@@ -74,6 +125,7 @@ typedef struct {
     int fd;
     uint32_t peri_base;
     volatile uint32_t *gpio;
+    volatile uint32_t *cm;   /* clock manager */
     int enabled;
 } rpi_gpio_t;
 
@@ -137,6 +189,102 @@ gpio_config_output(rpi_gpio_t *rg, int pin)
     mmio_barrier();
 }
 
+/* Set GPIO function to output: fsel=001 */
+static void
+gpio_config_alt(rpi_gpio_t *rg, int pin, uint32_t fsel_bits)
+{
+    uint32_t reg = pin / 10;          /* each GPFSEL covers 10 pins */
+    uint32_t shift = (pin % 10) * 3;
+    volatile uint32_t *fsel = &rg->gpio[GPFSEL0 / 4 + reg];
+
+    uint32_t v = *fsel;
+    v &= ~(7u << shift);
+    v |= (fsel_bits << shift);
+    *fsel = v;
+    mmio_barrier();
+}
+
+static inline void
+cm_wait_not_busy(volatile uint32_t *cm_ctl)
+{
+    for (int i = 0; i < 10000; i++) {
+        if ((*cm_ctl & CM_CTL_BUSY) == 0)
+            return;
+    }
+}
+
+static int
+rpi_gpclk0_set_hz(rpi_gpio_t *rg, uint32_t hz, uint32_t src, uint32_t mash)
+{
+    volatile uint32_t *ctl = &rg->cm[CM_GP0CTL / 4];
+    volatile uint32_t *div = &rg->cm[CM_GP0DIV / 4];
+
+    /* 1) disable */
+    *ctl = CM_PASSWD | (*ctl & ~CM_CTL_ENAB);
+    mmio_barrier();
+    cm_wait_not_busy(ctl);
+
+    /* 2) choose divisor */
+    /*    assume PLLD is 500MHz (XXX: Pi4 has 750MHz?) */
+    uint32_t divi = 0, divf = 0;
+
+    if (hz == 2000000u) {
+        divi = 250;
+        divf = 0;
+        mash = 0; /* integer divider */
+    } else if (hz == 1996800u) {
+        divi = 250;
+        divf = 1641;
+        mash = 1; /* fractional divider */
+    } else {
+        return 0;
+    }
+    *div = CM_PASSWD | ((divi & 0x0fffu) << 12u) | (divf & 0x0fffu);
+    mmio_barrier();
+
+    /* 3) enable with src+mash */
+    uint32_t ctlv = 0;
+    ctlv |= (src & CM_CTL_SRC_MASK);
+    ctlv |= ((mash & 3u) << CM_CTL_MASH_SHIFT);
+    ctlv |= CM_CTL_ENAB;
+
+    *ctl = CM_PASSWD | ctlv;
+    mmio_barrier();
+
+    return 1;
+}
+
+static int
+rpi_gpio_clock_enable(rpi_gpio_t *rg, int clock_pin, uint32_t clock_hz)
+{
+#ifdef BOARD_V1
+    /* GPIO20: ALT5=GPCLK0 (to avoid conflict with DA0 on GPIO4) */
+    if (clock_pin == 20) {
+        gpio_config_alt(rg, 20, GPIO_FSEL_ALT5);
+        return rpi_gpclk0_set_hz(rg, clock_hz, CM_SRC_PLLD, 1);
+    }
+#else
+    /* GPIO4: ALT0=GPCLK0 */
+    if (clock_pin == 4) {
+        gpio_config_alt(rg, 4, GPIO_FSEL_ALT0);
+        return rpi_gpclk0_set_hz(rg, clock_hz, CM_SRC_PLLD, 1);
+    }
+#endif
+
+    return 0;
+}
+
+static void
+rpi_gpio_clock_disable(rpi_gpio_t *rg)
+{
+    volatile uint32_t *ctl = &rg->cm[CM_GP0CTL / 4];
+
+    /* disable */
+    *ctl = CM_PASSWD | (*ctl & ~CM_CTL_ENAB);
+    mmio_barrier();
+    cm_wait_not_busy(ctl);
+}
+
 static void
 gpio_config(rpi_gpio_t *rg)
 {
@@ -175,7 +323,7 @@ gpio_wait(rpi_gpio_t *rg)
     mmio_barrier();
 }
 
-/* Put value on data bus GPIO4..11 in one operation (2 stores: clear then set) */
+/* Put value on data bus GPIOs in one operation (2 stores: clear then set) */
 static inline void
 bus_write8(rpi_gpio_t *rg, uint8_t v)
 {
@@ -298,6 +446,23 @@ rpi_gpio_init(psg_backend_t *psgbe)
 
     gpio_config(rg);
 
+    void *cm = mmap(NULL, CM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED,
+                   rg->fd, rg->peri_base + CM_OFFSET);
+    if (p == MAP_FAILED) {
+        snprintf(psgbe->last_error, PSG_BACKEND_LAST_ERROR_MAXLEN,
+            "mmap(CM @0x%08x): %s",
+            (unsigned int)(rg->peri_base + CM_OFFSET), strerror(errno));
+        munmap((void *)rg->gpio, GPIO_SIZE);
+        close(rg->fd);
+        free(rg);
+        return 0;
+    }
+    rg->cm = (volatile uint32_t *)cm;
+
+    /* enable clock by CM */
+    uint32_t psgclock = 2000000;
+    rpi_gpio_clock_enable(rg, PIN_CLOCK, psgclock);
+
     /* Safe default: inactive bus, deassert reset, clear data bus */
     ctrl_inactive(rg);
     bus_write8(rg, 0x00);
@@ -319,6 +484,11 @@ rpi_gpio_fini(psg_backend_t *psgbe)
     ctrl_inactive(rg);
     gpio_write_masks(rg, 0, MASK_RESET);
 
+    /* disable clock by CM */
+    rpi_gpio_clock_disable(rg);
+
+    if (rg->cm != NULL)
+        munmap((void *)rg->cm, CM_SIZE);
     if (rg->gpio != NULL)
         munmap((void *)rg->gpio, GPIO_SIZE);
     if (rg->fd != -1)
