@@ -5,7 +5,6 @@
 
 #include <sys/select.h>
 
-#include <inttypes.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +12,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "p6psg.h"
 #include "psg_driver.h"
 #include "player_ui.h"
 #include "psg_backend.h"
@@ -26,13 +26,6 @@ on_signal(int signo)
 {
     (void)signo;
     g_stop = 1;
-}
-
-static void
-die(const char *msg)
-{
-    perror(msg);
-    exit(1);
 }
 
 /* --- timing helpers --- */
@@ -85,6 +78,8 @@ main(int argc, char **argv)
 {
     const char *ifname;
     const char *title = NULL;
+    p6psg_t *p6psg = NULL;
+    p6psg_channel_dataset_t channels;
     psgio_t psgiostore, *psgio;
     psg_backend_ops_t ops_store, *ops;
     psg_backend_t psgbe_store, *psgbe;
@@ -117,40 +112,17 @@ main(int argc, char **argv)
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
 
-    /* read P6 PSG data file */
-    FILE *p6psgfile = fopen(ifname, "rb");
-    if (p6psgfile == NULL) {
-        die("fopen p6psgfile");
+    p6psg = p6psg_create();
+    if (p6psg == NULL) {
+        fprintf(stderr, "p6psg: out of memory\n");
+        status = EXIT_FAILURE;
+        goto out;
     }
-    fseek(p6psgfile, 0, SEEK_END);
-    size_t p6size = ftell(p6psgfile);
-    fseek(p6psgfile, 0, SEEK_SET);
-    if (p6size < (8 + 3)) {
-        die("p6psgfile too short");
-    }
-    uint8_t *psgdata = malloc(p6size);
-    if (psgdata == NULL) {
-        die("malloc p6psgfile");
-    }
-    if (fread(psgdata, 1, p6size, p6psgfile) != p6size) {
-        die("fread p6psgfile");
-    }
-    (void)fclose(p6psgfile);
 
-    /* parse and split P6 PSG data file per channel */
-    uint16_t a_addr = ((uint16_t)psgdata[1] << 8) | psgdata[0];
-    uint16_t b_addr = ((uint16_t)psgdata[3] << 8) | psgdata[2];
-    uint16_t c_addr = ((uint16_t)psgdata[5] << 8) | psgdata[4];
-    if (c_addr > p6size || b_addr >= c_addr || a_addr >= b_addr || a_addr < 8) {
-        die("p6psgfile invalid address");
-    }
-    uint16_t a_size = b_addr - a_addr;
-    uint16_t b_size = c_addr - b_addr;
-    uint16_t c_size = p6size - c_addr;
-    if (psgdata[a_addr + a_size - 1] != 0xff ||
-        psgdata[b_addr + b_size - 1] != 0xff ||
-        psgdata[c_addr + c_size - 1] != 0xff) {
-        die("p6psgfile invalid data");
+    if (p6psg_load(p6psg, ifname, &channels) == 0) {
+        fprintf(stderr, "%s: %s\n", ifname, p6psg_last_error(p6psg));
+        status = EXIT_FAILURE;
+        goto out;
     }
 
     /* ---- YM2149 backend bind/init/enable/reset ---- */
@@ -193,9 +165,9 @@ main(int argc, char **argv)
 
     drv = &psgdriver;
     psg_driver_init(drv, psg_write_reg_cb, ui_note_event_cb, psgio);
-    psg_driver_set_channel_data(drv, 0, &psgdata[a_addr]);
-    psg_driver_set_channel_data(drv, 1, &psgdata[b_addr]);
-    psg_driver_set_channel_data(drv, 2, &psgdata[c_addr]);
+    psg_driver_set_channel_data(drv, P6PSG_CH_A, channels.ch[P6PSG_CH_A].ptr);
+    psg_driver_set_channel_data(drv, P6PSG_CH_B, channels.ch[P6PSG_CH_B].ptr);
+    psg_driver_set_channel_data(drv, P6PSG_CH_C, channels.ch[P6PSG_CH_C].ptr);
     psg_driver_start(drv);
 
     /*
@@ -280,6 +252,6 @@ main(int argc, char **argv)
         backend_inited = 0;
     }
 
-    free(psgdata);
+    p6psg_destroy(p6psg);
     exit(status);
 }
