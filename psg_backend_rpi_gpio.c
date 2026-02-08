@@ -448,7 +448,7 @@ rpi_gpio_init(psg_backend_t *psgbe)
 
     void *cm = mmap(NULL, CM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED,
                    rg->fd, rg->peri_base + CM_OFFSET);
-    if (p == MAP_FAILED) {
+    if (cm == MAP_FAILED) {
         snprintf(psgbe->last_error, PSG_BACKEND_LAST_ERROR_MAXLEN,
             "mmap(CM @0x%08x): %s",
             (unsigned int)(rg->peri_base + CM_OFFSET), strerror(errno));

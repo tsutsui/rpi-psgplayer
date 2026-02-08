@@ -36,7 +36,7 @@ struct psg_backend {
 static inline const char *
 psg_backend_last_error(const psg_backend_t *psgbe)
 {
-    if (psgbe != NULL)
+    if (psgbe == NULL)
         return "(psgbe is NULL)";
 
     return psgbe->last_error;
