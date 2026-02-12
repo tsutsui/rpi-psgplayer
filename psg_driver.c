@@ -775,6 +775,12 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
                 continue;
             } else {
                 ch->active = 0;
+                /* 終了時はボリュームオフ */
+                psg_write(drv, AY_AVOL + ch->channel_index, 0);
+                /* UI 側ノート表示も VOL=0 かつ休符状態にする */
+                psg_note_event(drv, ch->channel_index,
+                               ch->octave, 0, 0, 0, 1,
+                               drv->main.bpm_x10);
                 return;
             }
         default:
