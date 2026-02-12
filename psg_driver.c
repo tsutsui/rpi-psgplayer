@@ -79,6 +79,17 @@ psg_write(PSGDriver *drv, uint8_t reg, uint8_t val)
     }
 }
 
+/* ボリューム値 0〜15 書き込みヘルパ */
+static inline int
+psg_clip_vol(int vol)
+{
+    if (vol > 15)
+        vol = 15;
+    if (vol < 0)
+        vol = 0;
+    return vol;
+}
+
 /* 周波数レジスタ書き込み用ヘルパ */
 static inline uint16_t
 psg_clamp_tone_12bit(int32_t t)
@@ -222,10 +233,7 @@ psg_psgeg_tick(PSGDriver *drv, PSGChannel *ch)
                     /* EG補正後ボリューム値書き込み */
                     int vol = ch->volume + ch->volume_adjust;
                     /* vol += fade; */
-                    if (vol > 15)
-                        vol = 15;
-                    if (vol < 0)
-                        vol = 0;
+                    vol = psg_clip_vol(vol);
                     psg_write(drv, AY_AVOL + ch->channel_index,
                               (uint8_t)vol);
                 } else {
@@ -242,10 +250,7 @@ psg_psgeg_tick(PSGDriver *drv, PSGChannel *ch)
                           ch->eg2_width_base + ch->eg_width_base;
                         int vol = ch->volume + ch->volume_adjust;
                         /* vol += fade; */
-                        if (vol > 15)
-                            vol = 15;
-                        if (vol < 0)
-                            vol = 0;
+                        vol = psg_clip_vol(vol);
                         psg_write(drv, AY_AVOL + ch->channel_index,
                                   (uint8_t)vol);
                     }
@@ -268,10 +273,7 @@ psg_psgeg_tick(PSGDriver *drv, PSGChannel *ch)
                         delta + ch->eg_width_base + ch->eg2_width_base;
                         int vol = ch->volume + ch->volume_adjust;
                         /* vol += fade; */
-                        if (vol > 15)
-                            vol = 15;
-                        if (vol < 0)
-                            vol = 0;
+                        vol = psg_clip_vol(vol);
                         psg_write(drv, AY_AVOL + ch->channel_index,
                                   (uint8_t)vol);
                 }
@@ -540,10 +542,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
                 if (prev_tie) {
                     /* タイ継続ならソフトウェアエンベロープ分も加算 */
                     vol += ch->volume_adjust;
-                    if (vol > 15)
-                        vol = 15;
-                    if (vol < 0)
-                        vol = 0;
+                    vol = psg_clip_vol(vol);
                 }
                 psg_write(drv, AY_AVOL + ch->channel_index,
                         (uint8_t)vol);
@@ -578,14 +577,12 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             continue;
         } else if (hi == 0xA0) {
             int vol = ch->volume + (code & 0x0F);
-            if (vol > 15)
-                vol = 15;
+            vol = psg_clip_vol(vol);
             ch->volume = vol;
             continue;
         } else if (hi == 0xB0) {
             int vol = ch->volume - (code & 0x0F);
-            if (vol < 0)
-                vol = 0;
+            vol = psg_clip_vol(vol);
             ch->volume = vol;
             continue;
         }
