@@ -243,8 +243,10 @@ psg_psgeg_tick(PSGDriver *drv, PSGChannel *ch)
                     int vol = ch->volume + ch->volume_adjust;
                     /* vol += fade; */
                     vol = psg_clip_vol(vol);
-                    psg_write(drv, AY_AVOL + ch->channel_index,
-                              (uint8_t)vol);
+                    if (vol != ch->prev_volume)
+                        psg_write(drv, AY_AVOL + ch->channel_index,
+                                  (uint8_t)vol);
+                    ch->prev_volume = vol;
                 } else {
                     /* EG変化幅に到達したら EG2段目開始処理 */
                     /* EG2 フラグセット */
@@ -260,8 +262,10 @@ psg_psgeg_tick(PSGDriver *drv, PSGChannel *ch)
                         int vol = ch->volume + ch->volume_adjust;
                         /* vol += fade; */
                         vol = psg_clip_vol(vol);
-                        psg_write(drv, AY_AVOL + ch->channel_index,
-                                  (uint8_t)vol);
+                        if (vol != ch->prev_volume)
+                            psg_write(drv, AY_AVOL + ch->channel_index,
+                                      (uint8_t)vol);
+                        ch->prev_volume = vol;
                     }
                 }
             }
@@ -283,8 +287,10 @@ psg_psgeg_tick(PSGDriver *drv, PSGChannel *ch)
                         int vol = ch->volume + ch->volume_adjust;
                         /* vol += fade; */
                         vol = psg_clip_vol(vol);
-                        psg_write(drv, AY_AVOL + ch->channel_index,
-                                  (uint8_t)vol);
+                        if (vol != ch->prev_volume)
+                            psg_write(drv, AY_AVOL + ch->channel_index,
+                                      (uint8_t)vol);
+                        ch->prev_volume = vol;
                 }
             }
         }
@@ -315,6 +321,7 @@ psg_channel_reset(PSGChannel *ch, int index)
 
     ch->volume        = 12;
     ch->octave        = 4;
+    ch->prev_volume   = 0;
 
     ch->j_return_offset = 0;
 }
@@ -424,6 +431,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
         if (ch->wait_counter == ch->q_counter) {
             /* 残り時間がゲート時間になったら音量オフ */
             psg_write(drv, AY_AVOL + ch->channel_index, 0);
+            ch->prev_volume = 0;
             /* 後は休符相当で発声処理なしなので休符フラグセットしてリターン */
             ch->flags |= CH_F_REST;
             return;
@@ -494,6 +502,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
 
                 /* 音量0を書き込み */
                 psg_write(drv, AY_AVOL + ch->channel_index, 0);
+                ch->prev_volume = 0;
 
                 /* ui 表示用ノートイベント更新 */
                 psg_note_event(drv, ch->channel_index,
@@ -555,6 +564,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
                 }
                 psg_write(drv, AY_AVOL + ch->channel_index,
                         (uint8_t)vol);
+                ch->prev_volume = vol;
 
                 /* ui 表示用ノートイベント更新 */
                 psg_note_event(drv, ch->channel_index,

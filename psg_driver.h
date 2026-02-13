@@ -87,6 +87,7 @@ typedef struct PSGChannel {
     int8_t         volume_adjust;   /* 音量補正値 */
 
     /* C版独自の補助情報 */
+    uint8_t        prev_volume;     /* 更新抑制用 前回tick補正後ボリューム値 */
     uint8_t        channel_index;   /* 0,1,2 など */
     uint8_t        active;          /* 0=停止, 1=再生中 */
 } PSGChannel;
