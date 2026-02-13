@@ -146,6 +146,15 @@ psg_vibrato_note_init(PSGChannel *ch)
     }
 }
 
+/* LFO時の周波数書き込みは Z80実装に合わせて ROUGH→FINE  の順にする */
+static inline void
+psg_write_tone_lfo(PSGDriver *drv, PSGChannel *ch, uint16_t tone)
+{
+    const uint8_t base = (uint8_t)(AY_AFINE + ch->channel_index * 2);
+    psg_write(drv, base + 1, (uint8_t)((tone >> 8) & 0x0f));
+    psg_write(drv, base + 0, (uint8_t)(tone & 0xff));
+}
+
 /* 発声中のLFO処理 */
 static void
 psg_vibrato_tick(PSGDriver *drv, PSGChannel *ch)
@@ -182,7 +191,7 @@ psg_vibrato_tick(PSGDriver *drv, PSGChannel *ch)
     {
         int32_t t = (int32_t)ch->freq_value + (int32_t)ch->vib_offset;
         uint16_t tone = psg_clamp_tone_12bit(t);
-        psg_write_tone(drv, ch, tone);
+        psg_write_tone_lfo(drv, ch, tone);
     }
 
     /* 振幅ありのとき、amp_work で方向反転 */
