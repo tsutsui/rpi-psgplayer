@@ -122,12 +122,31 @@ enum {
 #define NREAD_WAIT     3u
 
 typedef struct {
-    int fd;
+    const char *name;
     uint32_t peri_base;
+    uint32_t plld_hz;
+} rpi_soc_profile_t;
+
+typedef struct {
+    int fd;
+    const rpi_soc_profile_t *soc;
     volatile uint32_t *gpio;
     volatile uint32_t *cm;   /* clock manager */
     int enabled;
 } rpi_gpio_t;
+
+enum {
+    SOC_IDX_BCM2835 = 0,
+    SOC_IDX_BCM2836,
+    SOC_IDX_BCM2711,
+    SOC_IDX_COUNT,
+};
+
+static const rpi_soc_profile_t g_soc_profiles[SOC_IDX_COUNT] = {
+    [SOC_IDX_BCM2835] = { "BCM2835", PERI_BASE_BCM2835, 500000000u },
+    [SOC_IDX_BCM2836] = { "BCM2836/2837", PERI_BASE_BCM2836, 500000000u },
+    [SOC_IDX_BCM2711] = { "BCM2711", PERI_BASE_BCM2711, 750000000u },
+};
 
 /* Minimal memory barrier (ordering for MMIO) */
 static inline void
@@ -140,17 +159,16 @@ mmio_barrier(void)
 #endif
 }
 
-static uint32_t
-detect_peri_base(void)
+static const rpi_soc_profile_t *
+detect_soc_profile(void)
 {
     char model[256];
     size_t len = sizeof(model);
 
     /* Check Raspberry Pi model strings */
     if (sysctlbyname("hw.model", model, &len, NULL, 0) != 0) {
-        /* TODO: peri_base 判定ではなく、汎用の機種判定にすべき */
         /* assume Pi2/3 as default */
-        return PERI_BASE_BCM2836;
+        return &g_soc_profiles[SOC_IDX_BCM2836];
     }
     model[len - 1] = '\0';
 
@@ -158,20 +176,20 @@ detect_peri_base(void)
     if (strstr(model, "raspberrypi,model-a") != NULL ||
         strstr(model, "raspberrypi,model-b") != NULL ||
         strstr(model, "raspberrypi,model-zero") != NULL) {
-        return PERI_BASE_BCM2835;
+        return &g_soc_profiles[SOC_IDX_BCM2835];
     }
     if (strstr(model, "raspberrypi,2-model") != NULL ||
         strstr(model, "raspberrypi,3-model") != NULL ||
         strstr(model, "raspberrypi,3-compute") != NULL) {
-        return PERI_BASE_BCM2836;
+        return &g_soc_profiles[SOC_IDX_BCM2836];
     }
     if (strstr(model, "raspberrypi,4-model") != NULL ||
         strstr(model, "raspberrypi,400") != NULL) {
-        return PERI_BASE_BCM2711;
+        return &g_soc_profiles[SOC_IDX_BCM2711];
     }
 
     /* default Pi2/3 */
-    return PERI_BASE_BCM2836;
+    return &g_soc_profiles[SOC_IDX_BCM2836];
 }
 
 /* Set GPIO function to output: fsel=001 */
@@ -224,21 +242,23 @@ rpi_gpclk0_set_hz(rpi_gpio_t *rg, uint32_t hz, uint32_t src, uint32_t mash)
     mmio_barrier();
     cm_wait_not_busy(ctl);
 
-    /* 2) choose divisor */
-    /*    assume PLLD is 500MHz (XXX: Pi4 has 750MHz?) */
-    uint32_t divi = 0, divf = 0;
-
-    if (hz == 2000000u) {
-        divi = 250;
-        divf = 0;
-        mash = 0; /* integer divider */
-    } else if (hz == 1996800u) {
-        divi = 250;
-        divf = 1641;
-        mash = 1; /* fractional divider */
-    } else {
+    /* 2) choose divisor by source clock profile */
+    if (hz == 0 || rg->soc == NULL || rg->soc->plld_hz == 0) {
         return 0;
     }
+    uint64_t scaled = ((uint64_t)rg->soc->plld_hz << 12u) / hz;
+    uint32_t divi = (uint32_t)((scaled >> 12u) & 0x0fffu);
+    uint32_t divf = (uint32_t)(scaled & 0x0fffu);
+
+    if (divi == 0) {
+        return 0;
+    }
+
+    /* prefer integer divider when exact */
+    if (divf == 0) {
+        mash = 0;
+    }
+
     *div = CM_PASSWD | ((divi & 0x0fffu) << 12u) | (divf & 0x0fffu);
     mmio_barrier();
 
@@ -430,14 +450,14 @@ rpi_gpio_init(psg_backend_t *psgbe)
         return 0;
     }
 
-    rg->peri_base = detect_peri_base();
+    rg->soc = detect_soc_profile();
 
     void *p = mmap(NULL, GPIO_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED,
-                   rg->fd, rg->peri_base + GPIO_OFFSET);
+                   rg->fd, rg->soc->peri_base + GPIO_OFFSET);
     if (p == MAP_FAILED) {
         snprintf(psgbe->last_error, PSG_BACKEND_LAST_ERROR_MAXLEN,
             "mmap(GPIO @0x%08x): %s",
-            (unsigned int)(rg->peri_base + GPIO_OFFSET), strerror(errno));
+            (unsigned int)(rg->soc->peri_base + GPIO_OFFSET), strerror(errno));
         close(rg->fd);
         free(rg);
         return 0;
@@ -447,11 +467,11 @@ rpi_gpio_init(psg_backend_t *psgbe)
     gpio_config(rg);
 
     void *cm = mmap(NULL, CM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED,
-                   rg->fd, rg->peri_base + CM_OFFSET);
+                   rg->fd, rg->soc->peri_base + CM_OFFSET);
     if (cm == MAP_FAILED) {
         snprintf(psgbe->last_error, PSG_BACKEND_LAST_ERROR_MAXLEN,
             "mmap(CM @0x%08x): %s",
-            (unsigned int)(rg->peri_base + CM_OFFSET), strerror(errno));
+            (unsigned int)(rg->soc->peri_base + CM_OFFSET), strerror(errno));
         munmap((void *)rg->gpio, GPIO_SIZE);
         close(rg->fd);
         free(rg);
