@@ -783,6 +783,14 @@ ui_init(UI_state *ui, uint64_t now_ns)
     /* draw template now (once) */
     ui_draw_template_once(ui);
 
+    /*
+     * コンソール画面描画完了までとりあえず 500ms 待たせる
+     * マルチコアの Pi3 だと write(2) システムコールの先の
+     * wsdisplay 描画完了前でもユーザープロセスに戻ってくるようで
+     * 演奏開始後の初回描画で待たされてしまうようである
+     */
+    usleep(500 * 1000);
+
     ui->initialized = 1;
 }
 
