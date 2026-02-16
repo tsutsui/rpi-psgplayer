@@ -4,10 +4,10 @@
  *  via NetBSD gpio(4) /dev/gpio0 on Raspberry Pi 3B.
  *
  * Wiring (BC2=H fixed, A8=H A9=L fixed):
- *   GPIO4..11 -> DA0..7 (LSB=GPIO4)
- *   GPIO12    -> BDIR
- *   GPIO13    -> BC1
- *   GPIO16    -> RESET (active-high)
+ *   GPIO20..27 -> DA0..7 (LSB=GPIO20)
+ *   GPIO12     -> BDIR
+ *   GPIO13     -> BC1
+ *   GPIO17     -> RESET (active-high)
  *
  * Build:
  *   cc -O2 -Wall -Wextra -o psg_gpio_test psg_gpio_test.c
@@ -38,19 +38,19 @@
 
 /* ---- GPIO pin assignment (Raspberry Pi GPIO numbering) ---- */
 enum {
-    PIN_D0   = 4,  /* DA0 */
-    PIN_D1   = 5,
-    PIN_D2   = 6,
-    PIN_D3   = 7,
-    PIN_D4   = 8,
-    PIN_D5   = 9,
-    PIN_D6   = 10,
-    PIN_D7   = 11, /* DA7 */
+    PIN_D0   = 20,  /* DA0 */
+    PIN_D1   = 21,
+    PIN_D2   = 22,
+    PIN_D3   = 23,
+    PIN_D4   = 24,
+    PIN_D5   = 25,
+    PIN_D6   = 26,
+    PIN_D7   = 27, /* DA7 */
 
     PIN_BDIR = 12,
     PIN_BC1  = 13,
 
-    PIN_RESET = 16
+    PIN_RESET = 17
 };
 
 /* AY/YM2149 register numbers */
@@ -141,7 +141,7 @@ gpio_write(int fd, int pin, int value)
     }
 }
 
-/* Data bus: DA0..7 on GPIO4..11, LSB=GPIO4 */
+/* Data bus: DA0..7 */
 static void
 bus_write8(int fd, uint8_t v)
 {

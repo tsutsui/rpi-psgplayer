@@ -4,10 +4,10 @@
  *  using GPIO via /dev/mem mmap(2) on Raspberry Pi 3B
  *
  * Wiring (BC2=H fixed, A8=H A9=L fixed):
- *   GPIO4..11 -> DA0..7 (LSB=GPIO4)
- *   GPIO12    -> BDIR
- *   GPIO13    -> BC1
- *   GPIO16    -> RESET (active-high)
+ *   GPIO20..27 -> DA0..7 (LSB=GPIO20)
+ *   GPIO12     -> BDIR
+ *   GPIO13     -> BC1
+ *   GPIO17     -> RESET (active-high)
  *
  * Build:
  *   cc -O2 -Wall -Wextra -o psg_gpio_mmap_test psg_gpio_mmap_test.c
@@ -44,19 +44,19 @@
 
 /* ---- GPIO pin assignment (Raspberry Pi GPIO numbering) ---- */
 enum {
-    PIN_D0   = 4,  /* DA0 */
-    PIN_D1   = 5,
-    PIN_D2   = 6,
-    PIN_D3   = 7,
-    PIN_D4   = 8,
-    PIN_D5   = 9,
-    PIN_D6   = 10,
-    PIN_D7   = 11, /* DA7 */
+    PIN_D0   = 20, /* DA0 */
+    PIN_D1   = 21,
+    PIN_D2   = 22,
+    PIN_D3   = 23,
+    PIN_D4   = 24,
+    PIN_D5   = 25,
+    PIN_D6   = 26,
+    PIN_D7   = 27, /* DA7 */
 
     PIN_BDIR = 12,
     PIN_BC1  = 13,
 
-    PIN_RESET = 16
+    PIN_RESET = 17
 };
 
 /* AY/YM2149 register numbers */
@@ -80,7 +80,7 @@ enum {
 };
 
 /* Masks */
-#define MASK_DATABUS   (0xFFu << PIN_D0)              /* GPIO4..11 */
+#define MASK_DATABUS   (0xFFu << PIN_D0)
 #define MASK_BDIR      (1u << PIN_BDIR)
 #define MASK_BC1       (1u << PIN_BC1)
 #define MASK_CTRL      (MASK_BDIR | MASK_BC1)
@@ -154,7 +154,7 @@ gpio_write_masks(uint32_t set_mask, uint32_t clr_mask)
     mmio_barrier();
 }
 
-/* Put value on data bus GPIO4..11 in one operation (2 stores: clear then set) */
+/* Put value on data bus GPIOs in one operation (2 stores: clear then set) */
 static inline void
 bus_write8(uint8_t v)
 {
