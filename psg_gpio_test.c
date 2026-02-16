@@ -194,7 +194,7 @@ ctrl_write_data(int fd)
 static void
 ym_reset_pulse(int fd)
 {
-    /* assume active-low reset */
+    /* assume active-high reset */
     gpio_write(fd, PIN_RESET, 0);         /* deassert = 0 */
     sleep_us(10);
     gpio_write(fd, PIN_RESET, 1);         /* assert = 1 */

@@ -200,7 +200,7 @@ ctrl_write_data(void)
 static void
 ym_reset_pulse(void)
 {
-    /* assume active-low reset */
+    /* assume active-high reset */
     gpio_write_masks(0, MASK_RESET);      /* deassert = 0 */
     sleep_us(10);
     gpio_write_masks(MASK_RESET, 0);      /* assert = 1 */
