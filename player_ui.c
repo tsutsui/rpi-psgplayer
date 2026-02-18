@@ -49,6 +49,44 @@ static const char *ui_tmpl[UI_ROWS] = {
   "+-----------------------------------------------------------------------------+"  /* 22 */
 };
 
+/* 更新表示必要なパラメータの行と桁定義 (0-origin) */
+enum {
+    /* タイトル行: タイトル、テンポ、経過時間 */
+    ROW_TITLE = 4,
+
+    COL_TITLE = 15,
+    COL_TEMPO = 60,
+    COL_TSEC  = 69,
+
+    /* チャンネル A/B/C 行: ノート、周波数、ボリューム、トーン/ノイズ */
+    ROW_CH_A = 6,
+    ROW_CH_B = 7,
+    ROW_CH_C = 8,
+
+    COL_NOTE  = 13,
+    COL_HZ    = 17,
+    COL_VOLN  = 31,
+    COL_BAR   = 35,
+    COL_TONE  = 58,
+    COL_NOISE = 69,
+
+    /* ピアノロール表示行 */
+    ROW_PIANO_A = 14,
+    ROW_PIANO_B = 15,
+    ROW_PIANO_C = 16,
+
+    /* レジスタ値表示行 */
+    ROW_R0 = 18,
+    ROW_R2 = 19,
+    ROW_R4 = 20,
+    ROW_R6 = 21,
+
+    COL_R0 = 22, COL_R1 = 51, COL_R8 = 74,
+    COL_R2 = 22, COL_R3 = 51, COL_R9 = 74,
+    COL_R4 = 22, COL_R5 = 51, COL_RA = 74,
+    COL_R6 = 22, COL_R7 = 51
+};
+
 /* UI画面出力バッファリング */
 static inline void
 ui_out_reset(UI_state *ui)
@@ -318,44 +356,6 @@ piano_plot_col_noise(uint8_t reg6)
 }
 
 /* 状態表示更新処理 */
-
-/* 更新表示必要なパラメータの行と桁定義 (0-origin) */
-enum {
-    /* タイトル行: タイトル、テンポ、経過時間 */
-    ROW_TITLE = 4,
-
-    COL_TITLE = 15,
-    COL_TEMPO = 60,
-    COL_TSEC  = 69,
-
-    /* チャンネル A/B/C 行: ノート、周波数、ボリューム、トーン/ノイズ */
-    ROW_CH_A = 6,
-    ROW_CH_B = 7,
-    ROW_CH_C = 8,
-
-    COL_NOTE  = 13,
-    COL_HZ    = 17,
-    COL_VOLN  = 31,
-    COL_BAR   = 35,
-    COL_TONE  = 58,
-    COL_NOISE = 69,
-
-    /* ピアノロール表示行 */
-    ROW_PIANO_A = 14,
-    ROW_PIANO_B = 15,
-    ROW_PIANO_C = 16,
-
-    /* レジスタ値表示行 */
-    ROW_R0 = 18,
-    ROW_R2 = 19,
-    ROW_R4 = 20,
-    ROW_R6 = 21,
-
-    COL_R0 = 22, COL_R1 = 51, COL_R8 = 74,
-    COL_R2 = 22, COL_R3 = 51, COL_R9 = 74,
-    COL_R4 = 22, COL_R5 = 51, COL_RA = 74,
-    COL_R6 = 22, COL_R7 = 51
-};
 
 /* チャンネル別チャンネル状態表示行 */
 static inline int
