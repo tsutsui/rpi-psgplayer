@@ -552,6 +552,20 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
                 /* 現在の基準トーン値セット */
                 ch->freq_value = tone;
 
+#ifdef KEEP_VIBRATO_TIE
+                /*
+                 * タイ継続中の場合にビブラートも継続させる場合は
+                 * ビブラート周波数変化周期の位相を保持するために
+                 * ノート開始時に基準トーン値そのものではなく
+                 * 前ノートから継続中のビブラート補正値も加算反映した
+                 * 周波数値を書き込む必要がある
+                 */
+                if (prev_tie && (ch->flags & CH_F_VIB_ON) != 0) {
+                    int32_t t = (int32_t)tone + (int32_t)ch->vib_offset;
+                    tone = psg_clamp_tone_12bit(t);
+                }
+#endif
+
                 /* 周波数レジスタセット */
                 psg_write_tone(drv, ch, tone);
 
