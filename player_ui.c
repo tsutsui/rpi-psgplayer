@@ -860,13 +860,15 @@ ui_shutdown(UI_state *ui)
     if (ui == NULL || ui->initialized == 0)
         return;
 
-    ui_term_restore(ui);
-
-    /* move cursor (in case of no alternate screen) */
-    fputs("\033[24;1H", stdout);
-
     /* leave alternate screen */
     fputs("\033[?1049l", stdout);
+
+    ui_term_restore(ui);
+
+    /* move cursor to a safe row on primary screen */
+    fputs("\033[24;1H", stdout);
+    fflush(stdout);
+
     ui->initialized = 0;
 }
 
