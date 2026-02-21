@@ -246,7 +246,7 @@ ui_term_apply(UI_state *ui)
      * カーソルを消した位置でカーソル表示が出て残ってしまうっぽい（バグ?）ので
      * 先に表示枠外に移動させておく
      */
-    fputs("\033[24;1H", stdout);
+    fprintf(stdout, "\033[%d;1H", UI_ROWS + 1);
 
     /* カーソル消す */
     fputs("\033[?25l", stdout);
@@ -512,7 +512,7 @@ ui_draw_template_once(UI_state *ui)
     int n_flagrows = (sizeof(ui_flag_red_segs) / sizeof(ui_flag_red_segs[0]));
     ui_draw_red_segs_from_template(ui, ui_flag_red_segs, n_flagrows);
 
-    ui_out_puts(ui, "\033[24;1H\033[J");
+    ui_out_printf(ui, "\033[%d;1H\033[J", UI_ROWS + 1);
     ui_out_flush(ui);
     ui->template_drawn = 1;
 }
@@ -781,7 +781,7 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
     }
 
     /* park cursor + flush once */
-    ui_out_puts(ui, "\033[24;1H");
+    ui_out_printf(ui, "\033[%d;1H", UI_ROWS + 1);
     ui_out_flush(ui);
 }
 
@@ -866,7 +866,7 @@ ui_shutdown(UI_state *ui)
     ui_term_restore(ui);
 
     /* move cursor to a safe row on primary screen */
-    fputs("\033[24;1H", stdout);
+    fprintf(stdout, "\033[%d;1H", UI_ROWS + 1);
     fflush(stdout);
 
     ui->initialized = 0;
