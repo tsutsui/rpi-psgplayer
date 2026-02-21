@@ -1,6 +1,6 @@
 /*
  * player_ui.c
- *  For PSG Player demonstration on Raspberry Pi 3B at Open Source Conference
+ *  For PSG Player demonstration on Raspberry Pi at Open Source Conference
  */
 
 #include <stdio.h>
@@ -25,8 +25,8 @@ static const char *ui_tmpl[UI_ROWS] = {
 /* 0000000000111111111122222222223333333333444444444455555555556666666666777777777 */
 /* 0123456789012345678901234567890123456789012345678901234567890123456789012345678 */
  "\\--..,__,.,--''_-, -----------------------------------------------------------+", /*  0 */
-"\\\\          -'-_.     YM2149 PC6001 PSG Player on Raspberry Pi 3B             |", /*  1 */
-" \\\\._    _,--'   `     BCM2837 GPIO controlled by NetBSD/evbarm 11.0_RC1      |", /*  2 */
+"\\\\          -'-_.     YM2149 PC6001 PSG Player on Raspberry Pi 3B / Zero      |", /*  1 */
+" \\\\._    _,--'   `     BCM283x GPIO controlled by NetBSD/evbarm 11.0_RC1      |", /*  2 */
 "| \\\\ ``''               @ Open Source Conference 2026 Tokyo/Spring            |", /*  3 */
   "+-----------------------------------------------------------------------------+", /*  4 */
   "| Music Title: _____________________________________    bpm=___._  t=_____._s |", /*  5 */
