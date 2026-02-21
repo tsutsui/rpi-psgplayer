@@ -214,7 +214,7 @@ ui_draw_red_segs_from_template(UI_state *ui,
 static void
 ui_update_mixer(UI_state *ui)
 {
-    uint8_t m = ui->reg[7];
+    uint8_t m = ui->reg[AY_ENABLE];
     /* bit=1 disables */
     ui->tone_enable[0]  = ((m & 0x01) == 0);
     ui->tone_enable[1]  = ((m & 0x02) == 0);
@@ -683,8 +683,8 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
         /* Hz from register shadow (period) */
         {
             uint16_t period =
-                (uint16_t)ui->reg[ch * 2 + 0] |
-                ((uint16_t)(ui->reg[ch * 2 + 1] & 0x0f) << 8);
+                (uint16_t)ui->reg[AY_AFINE + ch * 2] |
+                ((uint16_t)(ui->reg[AY_ACOARSE + ch * 2] & 0x0f) << 8);
 
             char hz_fixed[UI_W_HZ + 1];
             if (ui->mus[ch].is_rest ||
@@ -741,7 +741,7 @@ ui_render(UI_state *ui, uint64_t now_ns, const char *title)
             int x = -1;
             if (want) {
                 if (noise_only) {
-                    x = piano_plot_col_noise(ui->reg[6]);
+                    x = piano_plot_col_noise(ui->noise_period);
                 } else {
                     x = piano_plot_col(ui->mus[ch].octave, ui->mus[ch].note);
                 }
@@ -792,9 +792,9 @@ ui_on_reg_write(UI_state *ui, uint8_t reg, uint8_t val)
     reg &= 0x0f;
     ui->reg[reg] = val;
 
-    if (reg == 6) {
-        ui->noise_period = ui->reg[6] & 0x1f;
-    } else if (reg == 7) {
+    if (reg == AY_NOISEPER) {
+        ui->noise_period = ui->reg[AY_NOISEPER] & 0x1f;
+    } else if (reg == AY_ENABLE) {
         ui_update_mixer(ui);
     }
 }
