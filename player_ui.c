@@ -87,6 +87,20 @@ enum {
     COL_R6 = 22, COL_R7 = 51
 };
 
+/* NetBSD Flag の旗部分を赤で描画する範囲 */
+struct ui_seg {
+    int row;   /* 表示行 (0-origin) */
+    int col;   /* 表示桁 (0-origin) */
+    int width; /* 旗部分の文字列幅 (US-ASCIIの1文字1バイト前提) */
+};
+
+static const struct ui_seg ui_flag_red_segs[4] = {
+    {  .row =  0, .col =  1, .width = 17 },
+    {  .row =  1, .col = 12, .width =  5 },
+    {  .row =  2, .col =  3, .width = 15 },
+    {  .row =  3, .col =  5, .width =  4 }
+};
+
 /* UI画面出力バッファリング */
 static inline void
 ui_out_reset(UI_state *ui)
@@ -154,6 +168,47 @@ ui_out_printf(UI_state *ui, const char *fmt, ...)
     va_end(ap);
     ui_out_append(ui, dyn, (size_t)n);
     free(dyn);
+}
+
+/* NetBSD flag 部分だけ赤で再描画するヘルパ */
+static void
+ui_draw_red_segs_from_template(UI_state *ui,
+    const struct ui_seg *segs, size_t nsegs)
+{
+    char buf[128];
+
+    if (ui == NULL || segs == NULL)
+        return;
+
+    for (size_t i = 0; i < nsegs; i++) {
+        int row = segs[i].row;
+        int col = segs[i].col;
+        int width = segs[i].width;
+
+        if (row < 0 || row >= UI_ROWS)
+            continue;
+        if (col < 0 || width <= 0)
+            continue;
+        if (col + width > UI_COLS)
+            continue;
+        if ((size_t)width >= sizeof(buf))
+            continue;
+
+        const char *line = ui_tmpl[row];
+        size_t n = strlen(line);
+        if (n != UI_COLS)
+            continue;
+
+        memcpy(buf, &line[col], (size_t)width);
+        buf[width] = '\0';
+
+        /* CUP ("\033[x;yH") は 1-based */
+        ui_out_printf(ui, "\033[%d;%dH", row + 1, col + 1);
+
+        ui_out_puts(ui, "\033[91m");
+        ui_out_append(ui, buf, (size_t)width);
+        ui_out_puts(ui, "\033[0m");
+    }
 }
 
 static void
@@ -452,6 +507,11 @@ ui_draw_template_once(UI_state *ui)
         ui_out_append(ui, ui_tmpl[r], UI_COLS);
         ui_out_puts(ui, "\n");
     }
+
+    /* NetBSD flag を赤く塗る */
+    int n_flagrows = (sizeof(ui_flag_red_segs) / sizeof(ui_flag_red_segs[0]));
+    ui_draw_red_segs_from_template(ui, ui_flag_red_segs, n_flagrows);
+
     ui_out_puts(ui, "\033[24;1H\033[J");
     ui_out_flush(ui);
     ui->template_drawn = 1;
