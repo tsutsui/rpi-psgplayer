@@ -460,7 +460,7 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             int tie = (code & F_TIE) ? 1 : 0;
 
             /* ゲートオフ時間設定 */
-            uint8_t q_counter = ch->q_default; 
+            uint8_t q_counter = ch->q_default;
             if (tie)
                 q_counter = 0;
 
@@ -630,13 +630,13 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
         int8_t detune, diff;
         switch (code) {
         case 0xea:    /* S コマンド */
-             p1 = ch->data_base[ch->data_offset++];
-             ch->eg_width_base = p1;
-             if (p1 != 0u) {
-                 ch->eg_count_base = ch->data_base[ch->data_offset++];
-                 ch->eg_delta_base = ch->data_base[ch->data_offset++];
-                 ch->eg2_width_base = ch->data_base[ch->data_offset++];
-                 ch->eg2_count_base = ch->data_base[ch->data_offset++];
+            p1 = ch->data_base[ch->data_offset++];
+            ch->eg_width_base = p1;
+            if (p1 != 0u) {
+                ch->eg_count_base = ch->data_base[ch->data_offset++];
+                ch->eg_delta_base = ch->data_base[ch->data_offset++];
+                ch->eg2_width_base = ch->data_base[ch->data_offset++];
+                ch->eg2_count_base = ch->data_base[ch->data_offset++];
             }
             continue;
         case 0xeb:    /* W コマンド */
@@ -737,16 +737,16 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             drv->main.i_command_value = ch->data_base[ch->data_offset++];
             continue;
         case 0xf5:    /* M コマンド */
-             ch->vib_wait_base = ch->data_base[ch->data_offset++];
-             ch->vib_count_base = ch->data_base[ch->data_offset++];
-             p3 = ch->data_base[ch->data_offset++];
-             ch->vib_amp_base = (uint8_t)(p3 * 2);
-             ch->vib_delta_base = (int8_t)ch->data_base[ch->data_offset++];
-             /* 第4パラメータでビブラートフラグセットクリア */
-             if (ch->vib_delta_base != 0)
-                 ch->flags |= CH_F_VIB_ON;
-             else
-                 ch->flags &= ~CH_F_VIB_ON;
+            ch->vib_wait_base = ch->data_base[ch->data_offset++];
+            ch->vib_count_base = ch->data_base[ch->data_offset++];
+            p3 = ch->data_base[ch->data_offset++];
+            ch->vib_amp_base = (uint8_t)(p3 * 2);
+            ch->vib_delta_base = (int8_t)ch->data_base[ch->data_offset++];
+            /* 第4パラメータでビブラートフラグセットクリア */
+            if (ch->vib_delta_base != 0)
+                ch->flags |= CH_F_VIB_ON;
+            else
+                ch->flags &= ~CH_F_VIB_ON;
 #ifdef KEEP_VIBRATO_TIE
             psg_vibrato_note_init(ch);
 #endif
@@ -767,8 +767,8 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             ch->l_default = ch->data_base[ch->data_offset++];
             continue;
         case 0xfa:    /* Q コマンド */
-           ch->q_default = ch->data_base[ch->data_offset++];
-           continue;
+            ch->q_default = ch->data_base[ch->data_offset++];
+            continue;
         case 0xfb:    /* U% コマンド */
             ch->detune = ch->data_base[ch->data_offset++];
             continue;
@@ -787,12 +787,12 @@ psg_channel_tick(PSGDriver *drv, PSGChannel *ch)
             ch->detune = (uint8_t)detune;
             continue;
         case 0xfd:    /* M% コマンド */
-             ch->vib_delta_base = (int8_t)ch->data_base[ch->data_offset++];
-             /* 第4パラメータでビブラートフラグセットクリア */
-             if (ch->vib_delta_base != 0)
-                 ch->flags |= CH_F_VIB_ON;
-             else
-                 ch->flags &= ~CH_F_VIB_ON;
+            ch->vib_delta_base = (int8_t)ch->data_base[ch->data_offset++];
+            /* 第4パラメータでビブラートフラグセットクリア */
+            if (ch->vib_delta_base != 0)
+                ch->flags |= CH_F_VIB_ON;
+            else
+                ch->flags &= ~CH_F_VIB_ON;
             continue;
         case 0xfe:    /* J コマンド */
             ch->j_return_offset = ch->data_offset;
