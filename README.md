@@ -66,6 +66,7 @@ options         INSECURE
 - **レベル変換やバスの電気的整合を取るための I/F 回路**（重要）
   - Raspberry Pi は 3.3V GPIO です
   - チップ側の電圧/しきい値/負荷を考慮して、自己責任で安全に接続してください
+  - 回路については [hw/SCHEMATIC.md](hw/SCHEMATIC.md) を参照してください
 
 ---
 
