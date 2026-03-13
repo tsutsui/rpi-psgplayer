@@ -31,7 +31,7 @@ typedef void (*PSGNoteEventFn)(void *opaque, int ch,
 #define F_LEN_2BYTE     0x30u       /* 11b:音長あり音符（音長２バイト） */
 #define F_PITCH         0x0fu       /* 0:休符, 1〜12:ド(C)〜シ(B) */
 
-/* チャンネルワーク（Z80 IY+0x00〜0x27 に対応するログical構造） */
+/* チャンネルワーク（Z80 IY+0x00〜0x27 に対応するデータ） */
 typedef struct PSGChannel {
     const uint8_t *data_base;       /* HL が指すオブジェクトデータ先頭 */
     uint16_t       data_offset;     /* HL 相当 */
